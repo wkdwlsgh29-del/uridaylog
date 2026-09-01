@@ -1,0 +1,101 @@
+/* 해열제 안심 계산기 전용 스타일 */
+
+.top { display: flex; align-items: center; justify-content: space-between; padding: 18px 0 6px; }
+.brand-mark { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 17px; }
+.brand-mark .logo {
+  width: 34px; height: 34px; display: grid; place-items: center;
+  background: linear-gradient(135deg, var(--danger-soft), #F8DEDE);
+  border-radius: 12px; font-size: 18px;
+}
+.top a { text-decoration: none; }
+
+.hero { padding: 26px 0 22px; }
+.hero h1 { font-size: 30px; line-height: 1.28; font-weight: 800; letter-spacing: -0.02em; }
+.hero h1 em { font-style: normal; color: var(--danger); background: linear-gradient(transparent 65%, var(--danger-soft) 65%); }
+.hero .sub { margin-top: 12px; color: var(--ink-soft); font-size: 15.5px; }
+
+.input-card { padding: 22px 20px; margin-top: 6px; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.input-card .btn { width: 100%; margin-top: 20px; padding: 16px; font-size: 17px; }
+.optional-tag { font-weight: 500; color: var(--ink-faint); }
+
+/* ---------- 타이머 카드 ---------- */
+.timer-card { margin-top: 20px; padding: 20px; }
+.timer-card h3 { font-size: 16px; font-weight: 800; margin-bottom: 4px; }
+.timer-empty { font-size: 13.5px; color: var(--ink-faint); }
+.timer-rows { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.timer-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; border-radius: var(--radius-sm);
+  background: var(--surface-warm); border: 1px solid var(--line);
+}
+.timer-row .t-ico { font-size: 20px; }
+.timer-row .t-main { flex: 1; }
+.timer-row .t-title { font-weight: 700; font-size: 14px; }
+.timer-row .t-sub { font-size: 12.5px; color: var(--ink-soft); margin-top: 2px; }
+.timer-row.ok { border-color: #CBE3D6; background: var(--sage-soft); }
+.timer-row.wait { border-color: #F0DFBB; background: var(--gold-soft); }
+.t-time { font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; }
+.timer-row.ok .t-time { color: var(--sage-deep); }
+.timer-row.wait .t-time { color: #A3701A; }
+
+/* ---------- 약물 카드 ---------- */
+.drug-card { margin-top: 14px; padding: 20px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+.drug-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.drug-name { font-size: 17px; font-weight: 800; }
+.drug-brands { font-size: 12px; color: var(--ink-faint); }
+.dose-box {
+  margin-top: 12px; display: flex; align-items: center; gap: 14px;
+  background: var(--brand-softer); border: 1px solid #F5DDD0;
+  border-radius: var(--radius-sm); padding: 14px 16px;
+}
+.dose-ml { font-size: 26px; font-weight: 800; color: var(--brand-deep); white-space: nowrap; }
+.dose-detail { font-size: 12.5px; color: var(--ink-soft); line-height: 1.55; }
+.drug-meta { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+.drug-note { margin-top: 10px; font-size: 12px; color: var(--ink-faint); line-height: 1.55; }
+.drug-card.blocked { opacity: 0.6; }
+.drug-card.blocked .dose-box { background: var(--line-soft); border-color: var(--line); }
+.drug-card.blocked .dose-ml { color: var(--ink-faint); }
+.age-warn {
+  margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-sm);
+  background: var(--danger-soft); color: var(--danger);
+  font-size: 12.5px; font-weight: 700; line-height: 1.5;
+}
+.took-btn {
+  margin-top: 12px; width: 100%; padding: 12px;
+  border-radius: var(--radius-sm); font-weight: 800; font-size: 14px;
+  background: var(--ink); color: #fff;
+}
+.took-btn:disabled { background: var(--line); color: var(--ink-faint); }
+
+/* ---------- 응급/팁/기록 ---------- */
+.danger-card { margin-top: 24px; padding: 20px; background: #FDF4F4; border-color: #F2DCDC; }
+.danger-card h3 { font-size: 15px; font-weight: 800; color: var(--danger); margin-bottom: 10px; }
+.danger-card ul { list-style: none; display: flex; flex-direction: column; gap: 9px; }
+.danger-card li { font-size: 13px; color: #8A4A4A; line-height: 1.55; padding-left: 18px; position: relative; }
+.danger-card li::before { content: '!'; position: absolute; left: 2px; color: var(--danger); font-weight: 800; }
+.danger-card li b { color: var(--danger); }
+
+.guide { margin-top: 14px; padding: 20px; background: var(--sage-soft); border: 1px solid #DBEAE2; border-radius: var(--radius); }
+.guide h3 { font-size: 15px; font-weight: 800; color: var(--sage-deep); margin-bottom: 10px; }
+.guide ul { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.guide li { font-size: 13.5px; color: #3E5C4E; padding-left: 20px; position: relative; line-height: 1.6; }
+.guide li::before { content: '✓'; position: absolute; left: 2px; color: var(--sage-deep); font-weight: 800; }
+
+.log-card { margin-top: 14px; padding: 18px 20px; }
+.log-card h3 { font-size: 15px; font-weight: 800; margin-bottom: 8px; }
+.log-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-soft); font-size: 13.5px; }
+.log-row:last-child { border-bottom: none; }
+.log-row .l-time { font-weight: 700; font-variant-numeric: tabular-nums; }
+.log-row .l-del { margin-left: auto; color: var(--ink-faint); font-size: 12px; padding: 4px 8px; }
+.log-empty { font-size: 13px; color: var(--ink-faint); }
+
+.foot { margin-top: 36px; padding-top: 20px; border-top: 1px solid var(--line); text-align: center; }
+.foot .ig { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; font-size: 15px; color: var(--danger); text-decoration: none; }
+.foot .made { margin-top: 8px; font-size: 12.5px; color: var(--ink-soft); }
+.disclaimer { margin-top: 14px; font-size: 11.5px; color: var(--ink-faint); line-height: 1.6; }
+
+@media (max-width: 380px) {
+  .hero h1 { font-size: 26px; }
+  .dose-ml { font-size: 22px; }
+}

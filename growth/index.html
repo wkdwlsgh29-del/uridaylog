@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>성장 백분위 카드 | uridaylog</title>
+  <meta name="description" content="아기 몸무게·키·머리둘레를 넣으면 WHO 성장 기준 백분위를 계산하고, 가족 단톡방에 공유할 예쁜 성장 카드를 만들어 드려요. 0~24개월, 무료." />
+  <meta name="theme-color" content="#FBF6F0" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="우리아기 성장 백분위 카드" />
+  <meta property="og:description" content="키·몸무게 넣으면 백분위 계산 + 공유용 성장 카드까지. 가입 없이 무료." />
+  <meta property="og:locale" content="ko_KR" />
+  <meta property="og:url" content="https://wkdwlsgh29-del.github.io/uridaylog/growth/" />
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📏</text></svg>" />
+
+  <link rel="stylesheet" as="style" crossorigin
+    href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+  <link rel="stylesheet" href="../shared/css/base.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="shell">
+
+    <header class="top">
+      <span class="brand-mark"><span class="logo">📏</span><span id="brandName">uridaylog</span></span>
+      <a id="brandIg" class="chip chip-brand" href="#" target="_blank" rel="noopener">Instagram</a>
+    </header>
+
+    <section class="hero" id="hero">
+      <h1>우리아기<br /><em>또래 100명 중</em><br />몇 번째일까?</h1>
+      <p class="sub">몸무게·키·머리둘레 백분위 계산 + 자랑용 성장 카드.<br />WHO 성장 기준(0~24개월), 가입 없이 무료.</p>
+    </section>
+
+    <section class="card input-card" id="inputCard">
+      <div class="row">
+        <label class="field-label">성별</label>
+        <div class="sex-grid">
+          <button class="sex-btn active" data-sex="1">👦 남아</button>
+          <button class="sex-btn" data-sex="2">👧 여아</button>
+        </div>
+      </div>
+      <div class="row two-col">
+        <div>
+          <label class="field-label" for="babyBirth">생년월일</label>
+          <input class="field" type="date" id="babyBirth" required />
+        </div>
+        <div>
+          <label class="field-label" for="measureDate">잰 날짜</label>
+          <input class="field" type="date" id="measureDate" />
+        </div>
+      </div>
+      <div class="row three-col">
+        <div>
+          <label class="field-label" for="weight">몸무게 kg</label>
+          <input class="field" type="number" id="weight" inputmode="decimal" step="0.01" min="1" max="30" placeholder="7.25" />
+        </div>
+        <div>
+          <label class="field-label" for="height">키 cm</label>
+          <input class="field" type="number" id="height" inputmode="decimal" step="0.1" min="40" max="110" placeholder="66.5" />
+        </div>
+        <div>
+          <label class="field-label" for="head">머리둘레 cm</label>
+          <input class="field" type="number" id="head" inputmode="decimal" step="0.1" min="28" max="55" placeholder="42.0" />
+        </div>
+      </div>
+      <p class="input-hint">아는 것만 넣어도 돼요 — 최소 1가지!</p>
+      <button class="btn btn-primary" id="makeBtn">백분위 계산하기</button>
+    </section>
+
+    <section id="result" class="hidden">
+      <div class="summary">
+        <div class="baby-line">
+          <span class="baby-name" id="sumTitle"></span>
+          <span class="baby-birth" id="sumSub"></span>
+        </div>
+      </div>
+
+      <div id="gauges"></div>
+
+      <div class="actions">
+        <button class="btn btn-ghost" id="imgBtn"><span class="ico">🖼️</span>성장 카드 저장</button>
+        <button class="btn btn-ghost" id="shareBtn"><span class="ico">🔗</span>링크 복사</button>
+        <button class="btn btn-ghost" id="resetBtn"><span class="ico">✏️</span>다시 재기</button>
+      </div>
+
+      <div class="card history-card" id="historyCard"></div>
+
+      <div class="guide">
+        <h3>백분위, 이렇게 읽어요</h3>
+        <ul>
+          <li>백분위 60 = 또래 100명을 작은 순으로 세웠을 때 60번째라는 뜻이에요. 클수록 좋은 게 아니라, <b>꾸준히 자기 곡선을 따라가는 게</b> 중요해요.</li>
+          <li>3~97 백분위 사이는 모두 정상 범위예요.</li>
+          <li>백분위가 갑자기 두 구간 이상 뛰거나 떨어지면 영유아검진 때 상담해 보세요.</li>
+          <li>이른둥이(37주 미만)는 만 2세까지 교정 나이 기준으로 보는 게 정확해요.</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="foot">
+      <a id="footIg" class="ig" href="#" target="_blank" rel="noopener">📷 <span id="footIgHandle"></span></a>
+      <div class="made">한 달에 한 번, 성장 카드를 남겨보세요 💛</div>
+      <p class="disclaimer" id="disclaimer"></p>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
