@@ -1,0 +1,108 @@
+/* ============================================================
+   우리아기 오늘 전용 스타일 (공용 토큰은 base.css)
+   ============================================================ */
+
+.top { display: flex; align-items: center; justify-content: space-between; padding: 18px 0 6px; }
+.brand-mark { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 17px; }
+.brand-mark .logo {
+  width: 34px; height: 34px; display: grid; place-items: center;
+  background: linear-gradient(135deg, var(--gold-soft), #FBE8C4);
+  border-radius: 12px; font-size: 18px;
+}
+.top a { text-decoration: none; }
+
+.hero { padding: 26px 0 22px; }
+.hero h1 { font-size: 30px; line-height: 1.28; font-weight: 800; letter-spacing: -0.02em; }
+.hero h1 em {
+  font-style: normal; color: #A3701A;
+  background: linear-gradient(transparent 65%, var(--gold-soft) 65%);
+}
+.hero .sub { margin-top: 12px; color: var(--ink-soft); font-size: 15.5px; }
+
+/* ---------- 입력 ---------- */
+.input-card { padding: 22px 20px; margin-top: 6px; }
+.input-card .row + .row { margin-top: 14px; }
+.input-card .btn { width: 100%; margin-top: 20px; padding: 16px; font-size: 17px; }
+.optional-tag { font-weight: 500; color: var(--ink-faint); }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* ---------- 요약 ---------- */
+.summary {
+  margin-top: 20px; padding: 22px 20px;
+  background: radial-gradient(120% 140% at 100% 0%, #FBEFD8 0%, var(--surface-warm) 55%);
+  border: 1px solid #F0E2C8; border-radius: var(--radius); box-shadow: var(--shadow-md);
+}
+.baby-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.baby-name { font-size: 24px; font-weight: 800; }
+.baby-birth { color: var(--ink-soft); font-size: 13.5px; }
+.age-line { margin-top: 4px; font-size: 14px; color: var(--ink-soft); }
+.age-line strong { color: #A3701A; }
+
+/* ---------- 카드 공통 ---------- */
+.ww-card, .sleep-card, .feed-card { margin-top: 14px; padding: 20px; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.card-head h3 { font-size: 16px; font-weight: 800; }
+
+/* ---------- 원더윅스 ---------- */
+.ww-status { display: flex; align-items: center; gap: 14px; }
+.ww-emoji {
+  flex-shrink: 0; width: 54px; height: 54px; border-radius: 18px;
+  display: grid; place-items: center; font-size: 28px;
+}
+.ww-emoji.storm { background: #EEE9FB; }
+.ww-emoji.sunny { background: var(--sage-soft); }
+.ww-title { font-weight: 800; font-size: 16px; }
+.ww-sub { margin-top: 3px; font-size: 13px; color: var(--ink-soft); line-height: 1.5; }
+.ww-desc {
+  margin-top: 12px; padding: 12px 14px;
+  background: var(--line-soft); border-radius: var(--radius-sm);
+  font-size: 13px; color: var(--ink-soft); line-height: 1.6;
+}
+.ww-bar { margin-top: 14px; height: 8px; border-radius: 99px; background: var(--line-soft); position: relative; overflow: hidden; }
+.ww-bar i { position: absolute; top: 0; bottom: 0; background: #B29AE8; border-radius: 99px; }
+.ww-bar b { position: absolute; top: -2px; width: 12px; height: 12px; background: var(--ink); border-radius: 50%; transform: translateX(-6px); }
+.ww-bar-label { display: flex; justify-content: space-between; margin-top: 6px; font-size: 11px; color: var(--ink-faint); font-weight: 600; }
+
+/* ---------- 수면 플랜 ---------- */
+.sleep-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 11px 0; border-bottom: 1px solid var(--line-soft);
+}
+.sleep-row:last-child { border-bottom: none; }
+.sleep-time { flex-shrink: 0; min-width: 92px; font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; }
+.sleep-ico { flex-shrink: 0; font-size: 18px; }
+.sleep-what { font-size: 14px; font-weight: 700; }
+.sleep-len { font-size: 12px; color: var(--ink-faint); margin-top: 1px; }
+.sleep-note { margin-top: 12px; font-size: 12px; color: var(--ink-faint); line-height: 1.6; }
+.sleep-row.bed .sleep-time { color: #6B4FA8; }
+
+/* ---------- 수유 ---------- */
+.feed-nums { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+.feed-num { background: var(--surface-warm); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 14px; text-align: center; }
+.feed-num .v { font-size: 20px; font-weight: 800; color: var(--brand-deep); }
+.feed-num .k { font-size: 12px; color: var(--ink-soft); margin-top: 3px; font-weight: 600; }
+.feed-note { margin-top: 12px; font-size: 12px; color: var(--ink-faint); line-height: 1.6; }
+
+/* ---------- 액션/가이드/푸터 ---------- */
+.actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 16px; }
+.actions .btn { padding: 12px 6px; font-size: 13.5px; border-radius: 14px; flex-direction: column; gap: 4px; }
+.actions .btn .ico { font-size: 20px; }
+
+.guide {
+  margin-top: 22px; padding: 20px;
+  background: var(--sage-soft); border: 1px solid #DBEAE2; border-radius: var(--radius);
+}
+.guide h3 { font-size: 15px; font-weight: 800; color: var(--sage-deep); margin-bottom: 10px; }
+.guide ul { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.guide li { font-size: 13.5px; color: #3E5C4E; padding-left: 20px; position: relative; line-height: 1.6; }
+.guide li::before { content: '✓'; position: absolute; left: 2px; color: var(--sage-deep); font-weight: 800; }
+
+.foot { margin-top: 36px; padding-top: 20px; border-top: 1px solid var(--line); text-align: center; }
+.foot .ig { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; font-size: 15px; color: #A3701A; text-decoration: none; }
+.foot .made { margin-top: 8px; font-size: 12.5px; color: var(--ink-soft); }
+.disclaimer { margin-top: 14px; font-size: 11.5px; color: var(--ink-faint); line-height: 1.6; }
+
+@media (max-width: 380px) {
+  .hero h1 { font-size: 26px; }
+  .actions .btn { font-size: 12.5px; }
+}

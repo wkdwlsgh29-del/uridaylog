@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>우리아기 오늘 | uridaylog</title>
+  <meta name="description" content="생일만 넣으면 오늘의 개월수, 원더윅스 도약 구간, 우리아기 맞춤 낮잠 시간표와 분유량까지. 매일 아침 여는 육아 대시보드." />
+  <meta name="theme-color" content="#FBF6F0" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="우리아기 오늘 — 개월수·원더윅스·낮잠 시간표" />
+  <meta property="og:description" content="아기가 오늘따라 보채는 이유, 오늘 낮잠은 몇 시에 재울지. 생일 하나로 확인하세요." />
+  <meta property="og:locale" content="ko_KR" />
+  <meta property="og:url" content="https://wkdwlsgh29-del.github.io/uridaylog/baby-today/" />
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>☀️</text></svg>" />
+
+  <link rel="stylesheet" as="style" crossorigin
+    href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+  <link rel="stylesheet" href="../shared/css/base.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="shell">
+
+    <header class="top">
+      <span class="brand-mark"><span class="logo">☀️</span><span id="brandName">uridaylog</span></span>
+      <a id="brandIg" class="chip chip-brand" href="#" target="_blank" rel="noopener">Instagram</a>
+    </header>
+
+    <section class="hero" id="hero">
+      <h1>아기가 오늘따라<br /><em>왜 보채는지</em>,<br />오늘 낮잠은 몇 시인지</h1>
+      <p class="sub">개월수 · 원더윅스 도약 · 맞춤 낮잠 시간표 · 분유량.<br />매일 아침 열어보는 육아 대시보드예요.</p>
+    </section>
+
+    <section class="card input-card" id="inputCard">
+      <div class="row">
+        <label class="field-label" for="babyBirth">아기 생년월일</label>
+        <input class="field" type="date" id="babyBirth" required />
+      </div>
+      <div class="row">
+        <label class="field-label" for="dueDate">출산예정일 <span class="optional-tag">(선택 — 원더윅스는 예정일 기준이에요)</span></label>
+        <input class="field" type="date" id="dueDate" />
+      </div>
+      <div class="row two-col">
+        <div>
+          <label class="field-label" for="wakeTime">오늘 기상 시각</label>
+          <input class="field" type="time" id="wakeTime" value="07:00" />
+        </div>
+        <div>
+          <label class="field-label" for="weight">몸무게 kg <span class="optional-tag">(선택)</span></label>
+          <input class="field" type="number" id="weight" inputmode="decimal" step="0.1" min="1" max="30" placeholder="예: 7.2" />
+        </div>
+      </div>
+      <button class="btn btn-primary" id="makeBtn">오늘의 육아 대시보드 열기</button>
+    </section>
+
+    <section id="result" class="hidden">
+
+      <div class="summary">
+        <div class="baby-line">
+          <span class="baby-name" id="sumAge"></span>
+          <span class="baby-birth" id="sumDplus"></span>
+        </div>
+        <div class="age-line" id="sumCorrected"></div>
+      </div>
+
+      <div class="card ww-card" id="wwCard"></div>
+
+      <div class="card sleep-card">
+        <div class="card-head">
+          <h3>😴 오늘의 낮잠 플랜</h3>
+          <span class="chip chip-mute" id="sleepMeta"></span>
+        </div>
+        <div id="sleepPlan"></div>
+        <div class="sleep-note" id="sleepNote"></div>
+      </div>
+
+      <div class="card feed-card" id="feedCard"></div>
+
+      <div class="actions">
+        <button class="btn btn-ghost" id="imgBtn"><span class="ico">🖼️</span>시간표 저장</button>
+        <button class="btn btn-ghost" id="shareBtn"><span class="ico">🔗</span>링크 복사</button>
+        <button class="btn btn-ghost" id="resetBtn"><span class="ico">✏️</span>정보 수정</button>
+      </div>
+
+      <div class="guide">
+        <h3>알아두면 좋아요</h3>
+        <ul id="tipsList"></ul>
+      </div>
+
+    </section>
+
+    <footer class="foot">
+      <a id="footIg" class="ig" href="#" target="_blank" rel="noopener">📷 <span id="footIgHandle"></span></a>
+      <div class="made">도움이 됐다면 저장하고, 필요한 분께 공유해 주세요 💛</div>
+      <p class="disclaimer" id="disclaimer"></p>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

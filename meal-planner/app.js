@@ -1,5 +1,6 @@
 import { BRAND } from '../shared/js/brand.js';
 import { parseDate, today, fmt, fmtShort, toISO } from '../shared/js/date-utils.js';
+import { CANVAS_FONT, roundRect, drawPill, downloadCanvas } from '../shared/js/canvas-utils.js';
 import { FOODS, STAGES, CATEGORY_LABEL, FORBIDDEN, RULES, FOOD_META, stageAtLeast } from './food-data.js';
 import { buildPlan } from './planner-logic.js';
 
@@ -123,7 +124,7 @@ function drawWeekImage() {
   const c = document.createElement('canvas');
   c.width = W; c.height = H;
   const x = c.getContext('2d');
-  const F = '"Pretendard Variable", Pretendard, sans-serif';
+  const F = CANVAS_FONT;
 
   x.fillStyle = '#FBF6F0';
   x.fillRect(0, 0, W, H);
@@ -154,9 +155,10 @@ function drawWeekImage() {
     x.fillText(fmtShort(d.date).slice(5), 90, y + 84);
 
     let px = 230;
-    px = drawPill(x, px, y + 40, p.stage.base, '#F6EEE5', '#7A6A5D', F);
-    if (d.newFood) px = drawPill(x, px, y + 40, `NEW ${d.newFood.name} ${d.introDay}/3`, '#E86A4E', '#FFFFFF', F);
-    d.sides.forEach((s) => { px = drawPill(x, px, y + 40, s.name, '#E9F3EE', '#41775F', F); });
+    px = drawPill(x, px, y + 40, p.stage.base, '#F6EEE5', '#7A6A5D');
+    if (d.adapt) px = drawPill(x, px, y + 40, '쌀미음 적응', '#E9F3EE', '#41775F');
+    if (d.newFood) px = drawPill(x, px, y + 40, `NEW ${d.newFood.name} ${d.introDay}/3`, '#E86A4E', '#FFFFFF');
+    d.sides.forEach((s) => { px = drawPill(x, px, y + 40, s.name, '#E9F3EE', '#41775F'); });
     if (d.newFood && d.newFood.allergy && d.introDay === 1) {
       x.fillStyle = '#A3701A';
       x.font = `600 22px ${F}`;
@@ -176,27 +178,6 @@ function drawWeekImage() {
   return c;
 }
 
-function roundRect(x, px, py, w, h, r) {
-  x.beginPath();
-  x.moveTo(px + r, py);
-  x.arcTo(px + w, py, px + w, py + h, r);
-  x.arcTo(px + w, py + h, px, py + h, r);
-  x.arcTo(px, py + h, px, py, r);
-  x.arcTo(px, py, px + w, py, r);
-  x.closePath();
-}
-
-function drawPill(x, px, py, text, bg, fg, F) {
-  x.font = `700 26px ${F}`;
-  const tw = x.measureText(text).width;
-  x.fillStyle = bg;
-  roundRect(x, px, py - 30, tw + 36, 46, 23);
-  x.fill();
-  x.fillStyle = fg;
-  x.fillText(text, px + 18, py + 2);
-  return px + tw + 36 + 12;
-}
-
 async function onImage() {
   if (isInApp) {
     showToast('⋯ 메뉴에서 "외부 브라우저로 열기" 후 다시 눌러주세요');
@@ -204,18 +185,8 @@ async function onImage() {
     return;
   }
   try { await document.fonts.ready; } catch (e) { /* ignore */ }
-  const c = drawWeekImage();
-  c.toBlob((blob) => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `이유식식단표_${state.plan.weeks[state.week].no}주차.png`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 3000);
-    showToast('이미지를 저장했어요! 인스타 스토리에 올려보세요 📸');
-  }, 'image/png');
+  downloadCanvas(drawWeekImage(), `이유식식단표_${state.plan.weeks[state.week].no}주차.png`,
+    () => showToast('이미지를 저장했어요! 인스타 스토리에 올려보세요 📸'));
 }
 
 // ---------- 공유/저장 ----------
