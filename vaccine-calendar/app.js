@@ -204,6 +204,7 @@ const isIOS = /iPhone|iPad|iPod/i.test(UA);
 const isAndroid = /Android/i.test(UA);
 
 function showICSGuide() {
+  $('sheetTitle').textContent = '📅 캘린더에 넣는 법';
   const body = $('icsGuideBody');
   if (isIOS) {
     body.innerHTML = `
@@ -225,6 +226,27 @@ function showICSGuide() {
       <ol>
         <li>다운로드된 .ics 파일을 캘린더 앱(구글/애플/아웃룩)으로 열면 전체 일정이 들어가요.</li>
       </ol>`;
+  }
+  $('icsGuide').classList.remove('hidden');
+}
+
+function showInstallGuide() {
+  $('sheetTitle').textContent = '📲 홈 화면에 추가하는 법';
+  const body = $('icsGuideBody');
+  if (isIOS) {
+    body.innerHTML = `
+      <ol>
+        <li>Safari 하단(또는 상단)의 <b>공유 버튼 ⬆︎</b>을 눌러주세요.</li>
+        <li>목록에서 <b>"홈 화면에 추가"</b>를 선택하고 <b>추가</b>를 누르면 끝!</li>
+      </ol>
+      <div class="sheet-tip">홈 화면 아이콘으로 열면 앱처럼 전체 화면으로 열려요. 인스타그램 안에서 보고 있다면 먼저 ⋯ 메뉴 → 외부 브라우저(Safari)로 열어주세요.</div>`;
+  } else {
+    body.innerHTML = `
+      <ol>
+        <li>브라우저 <b>⋮ 메뉴</b>를 눌러주세요.</li>
+        <li><b>"홈 화면에 추가"</b>(또는 "앱 설치")를 선택하면 끝!</li>
+      </ol>
+      <div class="sheet-tip">홈 화면 아이콘으로 열면 앱처럼 전체 화면으로 열려요.</div>`;
   }
   $('icsGuide').classList.remove('hidden');
 }
@@ -347,6 +369,32 @@ function init() {
     if (e.target === $('icsGuide')) $('icsGuide').classList.add('hidden');
   });
   if (isInApp) $('inappBanner').classList.remove('hidden');
+
+  // 홈 화면 추가 (PWA 설치)
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(() => { /* http 미리보기 등에선 무시 */ });
+  }
+  const isStandalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  let installPrompt = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    installPrompt = e;
+    if (!isStandalone) $('installBtn').classList.remove('hidden');
+  });
+  if (!isStandalone && isIOS) $('installBtn').classList.remove('hidden');
+  $('installBtn').addEventListener('click', async () => {
+    if (installPrompt) {
+      installPrompt.prompt();
+      const choice = await installPrompt.userChoice;
+      if (choice.outcome === 'accepted') {
+        $('installBtn').classList.add('hidden');
+        showToast('홈 화면에 추가됐어요!');
+      }
+      installPrompt = null;
+      return;
+    }
+    showInstallGuide();
+  });
 
   $('filters').addEventListener('click', (e) => {
     const btn = e.target.closest('.filter-btn');

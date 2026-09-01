@@ -1,0 +1,16 @@
+{
+  "name": "우리아기 접종·검진 캘린더",
+  "short_name": "접종캘린더",
+  "description": "생일만 넣으면 예방접종·영유아검진 전체 일정이 한눈에. uridaylog",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#FBF6F0",
+  "theme_color": "#FBF6F0",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

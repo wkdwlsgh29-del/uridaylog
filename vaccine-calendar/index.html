@@ -17,6 +17,12 @@
 
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍼</text></svg>" />
 
+  <!-- 홈 화면 추가 (PWA) -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <meta name="apple-mobile-web-app-title" content="접종캘린더" />
+  <meta name="mobile-web-app-capable" content="yes" />
+
   <link rel="stylesheet" as="style" crossorigin
     href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
   <link rel="stylesheet" href="../shared/css/base.css" />
@@ -95,6 +101,8 @@
       <button class="btn btn-ghost" id="resetBtn" style="width:100%; margin-top:20px;">다른 생일로 다시 만들기</button>
     </section>
 
+    <button class="btn btn-ghost install-btn hidden" id="installBtn">📲 홈 화면에 추가하고 앱처럼 쓰기</button>
+
     <footer class="foot">
       <a id="footIg" class="ig" href="#" target="_blank" rel="noopener">📷 <span id="footIgHandle"></span></a>
       <div class="made">도움이 됐다면 저장하고, 필요한 분께 공유해 주세요 💛</div>
@@ -106,7 +114,7 @@
 
   <div class="sheet-dim hidden" id="icsGuide">
     <div class="sheet">
-      <h3>📅 캘린더에 넣는 법</h3>
+      <h3 id="sheetTitle">📅 캘린더에 넣는 법</h3>
       <div id="icsGuideBody"></div>
       <button class="btn btn-primary" id="icsGuideClose" style="width:100%; margin-top:16px;">확인했어요</button>
     </div>

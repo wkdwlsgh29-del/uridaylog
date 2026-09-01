@@ -110,6 +110,11 @@
   transition: width 0.4s ease;
 }
 
+.install-btn {
+  width: 100%;
+  margin-top: 28px;
+}
+
 .bulk-btn {
   margin-top: 12px;
   width: 100%;
