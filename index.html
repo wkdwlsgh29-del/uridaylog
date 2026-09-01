@@ -2,15 +2,86 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>uridaylog</title>
-  <meta name="robots" content="noindex" />
-  <script>
-    // 도구가 늘어나기 전까지는 1호 도구로 바로 이동 (쿼리 유지)
-    location.replace('vaccine-calendar/' + location.search);
-  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>uridaylog — 육아 무료 도구함</title>
+  <meta name="description" content="생일만 넣으면 나오는 접종·검진 캘린더, 3일 룰 지킨 이유식 식단표. 가입 없이 무료로 쓰는 육아 도구 모음." />
+  <meta name="theme-color" content="#FBF6F0" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="uridaylog — 육아 무료 도구함" />
+  <meta property="og:description" content="가입 없이 무료로 쓰는 육아 도구 모음" />
+  <meta property="og:locale" content="ko_KR" />
+  <meta property="og:url" content="https://wkdwlsgh29-del.github.io/uridaylog/" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧸</text></svg>" />
+  <link rel="stylesheet" as="style" crossorigin
+    href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+  <link rel="stylesheet" href="shared/css/base.css" />
+  <style>
+    .hub-head { text-align: center; padding: 52px 0 10px; }
+    .hub-logo {
+      width: 76px; height: 76px; margin: 0 auto 16px;
+      display: grid; place-items: center; font-size: 40px;
+      background: linear-gradient(135deg, #FDEEE8, #FDE3D8);
+      border-radius: 26px; box-shadow: var(--shadow-md);
+    }
+    .hub-head h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; }
+    .hub-head p { margin-top: 8px; color: var(--ink-soft); font-size: 15px; }
+    .tools { margin-top: 30px; display: flex; flex-direction: column; gap: 14px; }
+    .tool-card {
+      display: flex; align-items: center; gap: 16px;
+      padding: 20px; text-decoration: none; color: inherit;
+      transition: transform 0.12s ease, box-shadow 0.15s ease;
+    }
+    .tool-card:active { transform: scale(0.98); }
+    .tool-card:hover { box-shadow: var(--shadow-md); }
+    .tool-emoji {
+      flex-shrink: 0; width: 56px; height: 56px;
+      display: grid; place-items: center; font-size: 28px; border-radius: 18px;
+    }
+    .tool-emoji.e1 { background: var(--brand-soft); }
+    .tool-emoji.e2 { background: var(--sage-soft); }
+    .tool-body { flex: 1; min-width: 0; }
+    .tool-name { font-weight: 800; font-size: 16.5px; }
+    .tool-desc { margin-top: 3px; font-size: 13px; color: var(--ink-soft); line-height: 1.5; }
+    .tool-arrow { color: var(--ink-faint); font-size: 18px; }
+    .hub-foot { margin-top: 44px; text-align: center; padding-bottom: 20px; }
+    .hub-foot .ig {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-weight: 800; font-size: 15px; color: var(--brand-deep); text-decoration: none;
+    }
+    .hub-foot .sub { margin-top: 10px; font-size: 12px; color: var(--ink-faint); }
+  </style>
 </head>
 <body>
-  <p style="font-family:sans-serif; padding:24px;">이동 중… <a href="vaccine-calendar/">접종·검진 캘린더 열기</a></p>
+  <div class="shell">
+    <header class="hub-head">
+      <div class="hub-logo">🧸</div>
+      <h1>uridaylog</h1>
+      <p>가입 없이, 무료로 쓰는 육아 도구함</p>
+    </header>
+
+    <nav class="tools">
+      <a class="card tool-card" href="vaccine-calendar/">
+        <span class="tool-emoji e1">🍼</span>
+        <span class="tool-body">
+          <span class="tool-name">접종·검진 캘린더</span>
+          <span class="tool-desc" style="display:block">생일만 넣으면 예방접종·영유아검진 전체 일정이 한눈에. 캘린더 등록까지.</span>
+        </span>
+        <span class="tool-arrow">›</span>
+      </a>
+      <a class="card tool-card" href="meal-planner/">
+        <span class="tool-emoji e2">🥣</span>
+        <span class="tool-body">
+          <span class="tool-name">이유식 식단표 생성기</span>
+          <span class="tool-desc" style="display:block">재료만 고르면 새 재료 3일 룰을 지킨 4주 식단표가 뚝딱.</span>
+        </span>
+        <span class="tool-arrow">›</span>
+      </a>
+    </nav>
+
+    <footer class="hub-foot">
+      <a class="ig" href="https://instagram.com/uriday_log" target="_blank" rel="noopener">📷 @uriday_log</a>
+      <div class="sub">새 도구가 계속 추가돼요 — 팔로우하고 소식 받아보세요</div>
+    </footer>
+  </div>
 </body>
 </html>

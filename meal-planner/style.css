@@ -1,0 +1,172 @@
+/* ============================================================
+   이유식 식단표 생성기 전용 스타일 (공용 토큰은 base.css)
+   ============================================================ */
+
+/* ---------- 헤더/히어로 (vaccine-calendar와 동일 패턴) ---------- */
+.top { display: flex; align-items: center; justify-content: space-between; padding: 18px 0 6px; }
+.brand-mark { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 17px; letter-spacing: -0.01em; }
+.brand-mark .logo {
+  width: 34px; height: 34px; display: grid; place-items: center;
+  background: linear-gradient(135deg, var(--sage-soft), #D8EDE2);
+  border-radius: 12px; font-size: 18px;
+}
+.top a { text-decoration: none; }
+
+.hero { padding: 26px 0 22px; }
+.hero h1 { font-size: 30px; line-height: 1.28; font-weight: 800; letter-spacing: -0.02em; }
+.hero h1 em {
+  font-style: normal; color: var(--sage-deep);
+  background: linear-gradient(transparent 65%, var(--sage-soft) 65%);
+}
+.hero .sub { margin-top: 12px; color: var(--ink-soft); font-size: 15.5px; }
+
+.inapp-banner {
+  margin: 14px 0 0; padding: 12px 14px;
+  background: var(--gold-soft); border: 1px solid #F0DFBB;
+  border-radius: var(--radius-sm); font-size: 13px; color: #7A5A16; line-height: 1.5;
+}
+
+/* ---------- 입력 ---------- */
+.input-card { padding: 22px 20px; margin-top: 6px; }
+.input-card .row + .row { margin-top: 20px; }
+.input-card .btn { width: 100%; margin-top: 22px; padding: 16px; font-size: 17px; }
+
+.stage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.stage-btn {
+  padding: 12px 10px; border-radius: var(--radius-sm);
+  border: 1.5px solid var(--line); background: var(--surface);
+  text-align: left; transition: border-color 0.15s, background 0.15s;
+}
+.stage-btn .s-name { font-weight: 800; font-size: 15px; }
+.stage-btn .s-months { font-size: 11.5px; color: var(--ink-faint); margin-top: 2px; }
+.stage-btn.active { border-color: var(--sage-deep); background: var(--sage-soft); }
+.stage-btn.active .s-name { color: var(--sage-deep); }
+
+.legend { display: flex; gap: 12px; margin: 4px 0 10px; flex-wrap: wrap; }
+.legend-item { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-soft); font-weight: 600; }
+.dot { width: 12px; height: 12px; border-radius: 4px; display: inline-block; }
+.dot-none { background: var(--surface); border: 1.5px solid var(--line); }
+.dot-eaten { background: var(--sage); }
+.dot-avoid { background: var(--danger); }
+
+.food-group { margin-top: 12px; }
+.food-group-title { font-size: 12px; font-weight: 800; color: var(--ink-faint); margin-bottom: 6px; letter-spacing: 0.03em; }
+.food-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.food-chip {
+  padding: 7px 13px; border-radius: var(--radius-pill);
+  border: 1.5px solid var(--line); background: var(--surface);
+  font-size: 13.5px; font-weight: 600; color: var(--ink);
+  transition: all 0.12s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.food-chip.locked { opacity: 0.35; pointer-events: none; }
+.food-chip.eaten { background: var(--sage); border-color: var(--sage); color: #fff; }
+.food-chip.avoid { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); text-decoration: line-through; }
+
+/* ---------- 요약 ---------- */
+.summary {
+  margin-top: 20px; padding: 22px 20px;
+  background: radial-gradient(120% 140% at 100% 0%, #E3F1E9 0%, var(--surface-warm) 55%);
+  border: 1px solid #D5E8DC; border-radius: var(--radius); box-shadow: var(--shadow-md);
+}
+.baby-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.baby-name { font-size: 21px; font-weight: 800; }
+.baby-birth { color: var(--ink-soft); font-size: 13.5px; }
+.age-line { margin-top: 4px; font-size: 15px; color: var(--ink-soft); }
+.age-line strong { color: var(--sage-deep); font-weight: 800; }
+.stage-info {
+  margin-top: 14px; padding: 12px 14px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  font-size: 13px; color: var(--ink-soft); line-height: 1.6;
+}
+
+.actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+.actions .btn { padding: 12px 6px; font-size: 13.5px; border-radius: 14px; flex-direction: column; gap: 4px; }
+.actions .btn .ico { font-size: 20px; }
+
+/* ---------- 주차 탭 ---------- */
+.filters {
+  display: flex; gap: 8px; margin: 26px 0 4px;
+  position: sticky; top: 0; z-index: 5;
+  background: linear-gradient(var(--bg) 85%, transparent); padding: 10px 0;
+}
+.filter-btn {
+  padding: 8px 16px; border-radius: var(--radius-pill);
+  font-size: 14px; font-weight: 700; color: var(--ink-soft);
+  background: var(--surface); border: 1.5px solid var(--line);
+}
+.filter-btn.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+/* ---------- 데이 카드 ---------- */
+.day-card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-sm);
+  padding: 14px 16px; margin-top: 10px;
+}
+.day-head { display: flex; align-items: baseline; gap: 8px; }
+.day-no { font-weight: 800; font-size: 15px; }
+.day-date { font-size: 12.5px; color: var(--ink-faint); font-weight: 600; }
+.day-foods { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pill {
+  padding: 5px 11px; border-radius: var(--radius-pill);
+  font-size: 13px; font-weight: 700;
+}
+.pill-base { background: var(--line-soft); color: var(--ink-soft); }
+.pill-new { background: var(--brand); color: #fff; }
+.pill-new .cnt { opacity: 0.8; font-size: 11px; }
+.pill-side { background: var(--sage-soft); color: var(--sage-deep); }
+.day-caution {
+  margin-top: 8px; font-size: 12px; color: #A3701A;
+  background: var(--gold-soft); border-radius: 8px; padding: 7px 10px; line-height: 1.5;
+}
+
+/* ---------- 장보기/금지 카드 ---------- */
+.shopping { margin-top: 24px; padding: 18px 20px; }
+.shopping h3 { font-size: 15px; font-weight: 800; margin-bottom: 10px; }
+.shop-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.shop-chip {
+  padding: 6px 12px; border-radius: var(--radius-pill);
+  background: var(--line-soft); font-size: 13px; font-weight: 600; color: var(--ink-soft);
+}
+.shop-chip.new { background: var(--brand-soft); color: var(--brand-deep); font-weight: 800; }
+
+.guide {
+  margin-top: 20px; padding: 20px;
+  background: var(--sage-soft); border: 1px solid #DBEAE2; border-radius: var(--radius);
+}
+.guide h3 { font-size: 15px; font-weight: 800; color: var(--sage-deep); margin-bottom: 10px; }
+.guide ul { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.guide li { font-size: 13.5px; color: #3E5C4E; padding-left: 20px; position: relative; line-height: 1.6; }
+.guide li::before { content: '✓'; position: absolute; left: 2px; color: var(--sage-deep); font-weight: 800; }
+
+.forbidden-card { margin-top: 14px; padding: 18px 20px; background: #FDF4F4; border-color: #F2DCDC; }
+.forbidden-card h3 { font-size: 15px; font-weight: 800; color: var(--danger); margin-bottom: 10px; }
+.forbidden-card ul { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.forbidden-card li { font-size: 13px; color: #8A4A4A; line-height: 1.55; }
+.forbidden-card li b { color: var(--danger); }
+
+/* ---------- 푸터 ---------- */
+.foot { margin-top: 36px; padding-top: 20px; border-top: 1px solid var(--line); text-align: center; }
+.foot .ig { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; font-size: 15px; color: var(--sage-deep); text-decoration: none; }
+.foot .made { margin-top: 8px; font-size: 12.5px; color: var(--ink-soft); }
+.disclaimer { margin-top: 14px; font-size: 11.5px; color: var(--ink-faint); line-height: 1.6; }
+
+/* ---------- 인쇄 ---------- */
+#printSheet { display: none; }
+@media print {
+  body { background: #fff; }
+  .shell > *:not(#printSheet) { display: none !important; }
+  #printSheet { display: block; }
+  #printSheet h1 { font-size: 20px; margin-bottom: 2px; }
+  #printSheet .p-sub { font-size: 12px; color: #555; margin-bottom: 12px; }
+  .p-table { width: 100%; border-collapse: collapse; font-size: 10.5px; page-break-inside: avoid; margin-bottom: 14px; }
+  .p-table th, .p-table td { border: 1px solid #ccc; padding: 5px 7px; text-align: left; vertical-align: top; }
+  .p-table th { background: #f0f4f1; font-size: 10px; }
+  .p-new { font-weight: 800; }
+  .p-foot { margin-top: 10px; font-size: 10px; color: #777; }
+}
+
+@media (max-width: 380px) {
+  .hero h1 { font-size: 26px; }
+  .actions .btn { font-size: 12.5px; }
+}

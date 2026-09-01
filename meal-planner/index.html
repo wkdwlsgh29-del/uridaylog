@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>이유식 식단표 생성기 | uridaylog</title>
+  <meta name="description" content="아기가 먹어본 재료만 고르면 '새 재료 3일 룰'을 지킨 4주 이유식 식단표가 자동으로 나옵니다. 장보기 리스트와 인쇄·이미지 저장까지 무료." />
+  <meta name="theme-color" content="#FBF6F0" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="이유식 식단표 생성기" />
+  <meta property="og:description" content="재료만 고르면 3일 룰 지킨 4주 식단표가 뚝딱. 가입 없이 무료." />
+  <meta property="og:locale" content="ko_KR" />
+  <meta property="og:url" content="https://wkdwlsgh29-del.github.io/uridaylog/meal-planner/" />
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🥣</text></svg>" />
+
+  <link rel="stylesheet" as="style" crossorigin
+    href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+  <link rel="stylesheet" href="../shared/css/base.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="shell">
+
+    <div class="inapp-banner hidden" id="inappBanner">
+      📱 인스타그램 안에서 열렸어요. 이미지 저장·인쇄가 안 되면
+      오른쪽 위 <b>⋯ 메뉴 → 외부 브라우저에서 열기</b>를 눌러주세요.
+    </div>
+
+    <header class="top">
+      <span class="brand-mark"><span class="logo">🥣</span><span id="brandName">uridaylog</span></span>
+      <a id="brandIg" class="chip chip-brand" href="#" target="_blank" rel="noopener">Instagram</a>
+    </header>
+
+    <section class="hero" id="hero">
+      <h1>재료만 고르면<br /><em>3일 룰 지킨 식단표</em>가<br />뚝딱 나와요</h1>
+      <p class="sub">새 재료는 하나씩 3일 관찰 — 원칙은 자동으로 지켜드려요.<br />4주 식단표 + 장보기 리스트, 가입 없이 무료.</p>
+    </section>
+
+    <section class="card input-card" id="inputCard">
+      <div class="row">
+        <label class="field-label">지금 어느 단계인가요?</label>
+        <div class="stage-grid" id="stageGrid"></div>
+      </div>
+      <div class="row">
+        <label class="field-label" for="startDate">식단표 시작일</label>
+        <input class="field" type="date" id="startDate" />
+      </div>
+      <div class="row">
+        <label class="field-label">재료를 눌러 표시해 주세요</label>
+        <div class="legend">
+          <span class="legend-item"><i class="dot dot-none"></i>안 먹어봄</span>
+          <span class="legend-item"><i class="dot dot-eaten"></i>먹어봤어요 ✓</span>
+          <span class="legend-item"><i class="dot dot-avoid"></i>피할래요 ✕</span>
+        </div>
+        <div id="foodPicker"></div>
+      </div>
+      <button class="btn btn-primary" id="makeBtn">4주 식단표 만들기</button>
+    </section>
+
+    <section id="result" class="hidden">
+      <div class="summary">
+        <div class="baby-line">
+          <span class="baby-name" id="sumStage"></span>
+          <span class="baby-birth" id="sumRange"></span>
+        </div>
+        <div class="age-line"><strong id="sumNew"></strong>의 새 재료를 도입해요</div>
+        <div class="stage-info" id="stageInfo"></div>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-ghost" id="imgBtn"><span class="ico">🖼️</span>이미지 저장</button>
+        <button class="btn btn-ghost" id="printBtn"><span class="ico">🖨️</span>인쇄하기</button>
+        <button class="btn btn-ghost" id="shareBtn"><span class="ico">🔗</span>링크 복사</button>
+      </div>
+
+      <div class="filters" id="weekTabs"></div>
+
+      <div id="dayList"></div>
+
+      <div class="card shopping" id="shoppingCard">
+        <h3>🛒 이번 주 장보기</h3>
+        <div id="shoppingList"></div>
+      </div>
+
+      <div class="guide">
+        <h3>이유식 원칙, 이것만 기억하세요</h3>
+        <ul id="rulesList"></ul>
+      </div>
+
+      <div class="card forbidden-card">
+        <h3>🚫 돌 전에는 안 돼요</h3>
+        <ul id="forbiddenList"></ul>
+      </div>
+
+      <button class="btn btn-ghost" id="resetBtn" style="width:100%; margin-top:20px;">다시 만들기</button>
+    </section>
+
+    <footer class="foot">
+      <a id="footIg" class="ig" href="#" target="_blank" rel="noopener">📷 <span id="footIgHandle"></span></a>
+      <div class="made">도움이 됐다면 저장하고, 필요한 분께 공유해 주세요 💛</div>
+      <p class="disclaimer" id="disclaimer"></p>
+    </footer>
+
+    <div id="printSheet"></div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
