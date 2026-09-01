@@ -35,4 +35,7 @@ npx -y serve . -l 5180
 
 ## 배포
 
-정적 호스팅 아무 곳이나. 권장: Vercel(무료) — 저장소 연결 후 루트 그대로 배포.
+- **웹**: GitHub Pages — `main`에 push하면 자동 배포. https://wkdwlsgh29-del.github.io/uridaylog/
+- **캘린더 서버 함수**: Supabase Edge Function `uriday-ics` (프로젝트 bmedbitonzkggfenymog, 공개·JWT 없음).
+  소스는 `supabase/functions/uriday-ics/` — **`schedule-data.js` 등 일정 파일을 수정하면 이 함수도 재배포**해야
+  웹과 캘린더 파일의 일정이 어긋나지 않는다 (함수에 저장소 원본 파일을 동봉해 배포하는 구조).
