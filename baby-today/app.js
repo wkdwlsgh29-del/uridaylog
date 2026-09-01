@@ -116,7 +116,8 @@ function buildSchedule() {
   let t = wake;
   const n = bracket.napCount;
   for (let k = 0; k < n; k++) {
-    const win = Math.round(bracket.wwMin + (bracket.wwMax - bracket.wwMin) * (k / n));
+    // 잠텀은 하루가 갈수록 길어짐: 구간을 (낮잠 수+1)등분해 점진 증가, 취침 전이 최장
+    const win = Math.round(bracket.wwMin + (bracket.wwMax - bracket.wwMin) * ((k + 1) / (n + 1)));
     const start = t + win;
     rows.push({ t: start, ico: '😴', what: `낮잠 ${k + 1}`, len: `약 ${fmtLen(bracket.napMin)} · 깨어있은 지 ${fmtLen(win)} 뒤`, nap: true });
     t = start + bracket.napMin;
