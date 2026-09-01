@@ -61,8 +61,16 @@ function render() {
   $('bulkPastBtn').classList.toggle('hidden', pastPending.length === 0);
   $('bulkPastBtn').dataset.count = pastPending.length;
 
-  // 타임라인 (시작일 기준 그룹)
-  const filtered = events.filter((e) => state.filter === 'all' || e.cat === state.filter);
+  // 완료 탭 카운트
+  $('doneTab').textContent = doneCount ? `완료 ${doneCount}` : '완료';
+
+  // 타임라인 (시작일 기준 그룹) — 완료 항목은 '완료' 탭에만 모아서 보여준다
+  const filtered = events.filter((e) => {
+    const isDone = state.done.has(e.key);
+    if (state.filter === 'done') return isDone;
+    if (isDone) return false;
+    return state.filter === 'all' || e.cat === state.filter;
+  });
   const groups = new Map();
   for (const ev of filtered) {
     const k = toISO(ev.start);
@@ -72,6 +80,13 @@ function render() {
 
   const tl = $('timeline');
   tl.innerHTML = '';
+  if (!filtered.length) {
+    tl.innerHTML = state.filter === 'done'
+      ? '<div class="tl-empty">아직 완료로 표시한 일정이 없어요.<br />항목의 체크박스를 누르면 여기로 모여요 ✔</div>'
+      : '<div class="tl-empty">남은 일정이 없어요 🎉</div>';
+    renderPrintSheet(events);
+    return;
+  }
   for (const g of groups.values()) {
     const gStatuses = g.items.map(statusOf);
     const gClass = gStatuses.some((s) => s === 'now') ? 'g-now'
