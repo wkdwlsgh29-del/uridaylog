@@ -73,6 +73,7 @@ function renderWeek() {
       </div>
       <div class="day-foods">
         <span class="pill pill-base">${p.stage.base}</span>
+        ${d.adapt ? '<span class="pill pill-side">첫 3일은 쌀미음만 — 숟가락 적응 기간</span>' : ''}
         ${d.newFood ? `<span class="pill pill-new">NEW ${d.newFood.name} <span class="cnt">${d.introDay}/3</span></span>` : ''}
         ${d.sides.map((s) => `<span class="pill pill-side">${s.name}</span>`).join('')}
       </div>
@@ -99,7 +100,7 @@ function renderPrintSheet() {
           ${days.map((d) => `
             <tr>
               <td>${d.idx + 1}일차<br /><span style="color:#888">${fmtShort(d.date).slice(5)}</span></td>
-              <td class="p-new">${d.newFood ? `${d.newFood.name} (${d.introDay}/3)${d.newFood.allergy ? ' ⚠' : ''}` : '-'}</td>
+              <td class="p-new">${d.adapt ? '쌀미음 적응' : d.newFood ? `${d.newFood.name} (${d.introDay}/3)${d.newFood.allergy ? ' ⚠' : ''}` : '-'}</td>
               <td>${p.stage.base}${d.sides.length ? ' + ' + d.sides.map((s) => s.name).join(', ') : ''}</td>
               <td></td>
             </tr>`).join('')}

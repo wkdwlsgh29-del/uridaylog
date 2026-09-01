@@ -45,14 +45,26 @@ export function buildPlan({ startDate, stageId, eatenIds, avoidIds, days = 28 })
     return null;
   }
 
+  // 완전 처음 시작(초기 + 먹어본 재료 없음)이면 첫 3일은 쌀미음 단독 적응
+  const riceAdaptDays = (stageId === 'early' && known.length === 0) ? 3 : 0;
+
   const planDays = [];
   for (let i = 0; i < days; i++) {
-    const block = Math.floor(i / 3);
+    if (i < riceAdaptDays) {
+      planDays.push({
+        idx: i, date: addDays(startDate, i),
+        newFood: null, introDay: 0, sides: [], adapt: true,
+        caution: '',
+      });
+      continue;
+    }
+    const j = i - riceAdaptDays;
+    const block = Math.floor(j / 3);
     const newFood = queue[block] || null;
-    const introDay = newFood ? (i % 3) + 1 : 0;
+    const introDay = newFood ? (j % 3) + 1 : 0;
 
     // 3일 블록이 끝난 재료는 로테이션 풀에 편입
-    if (i > 0 && i % 3 === 0 && queue[block - 1]) {
+    if (j > 0 && j % 3 === 0 && queue[block - 1]) {
       const done = queue[block - 1];
       const g = PROTEIN_CATS.has(done.category) ? 'protein' : done.category === 'vegetable' ? 'veg' : 'other';
       rot[g].push(done);
@@ -95,6 +107,7 @@ export function buildPlan({ startDate, stageId, eatenIds, avoidIds, days = 28 })
     weeks.push({ no: w + 1, newFoods: [...newNames], shopping: [...names] });
   }
 
-  const newCount = Math.min(Math.ceil(days / 3), queue.length);
-  return { stage, days: planDays, weeks, newCount, queueExhausted: queue.length <= Math.ceil(days / 3) };
+  const blocks = Math.ceil((days - riceAdaptDays) / 3);
+  const newCount = Math.min(blocks, queue.length);
+  return { stage, days: planDays, weeks, newCount, queueExhausted: queue.length <= blocks };
 }
