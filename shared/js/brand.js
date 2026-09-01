@@ -4,4 +4,7 @@ export const BRAND = {
   instagram: '@uriday_log',
   instagramUrl: 'https://instagram.com/uriday_log',
   siteUrl: 'https://wkdwlsgh29-del.github.io/uridaylog/vaccine-calendar/',
+  // 캘린더(.ics)를 올바른 MIME 타입으로 서빙하는 서버 함수 (Supabase Edge).
+  // 비우면 브라우저 내 파일 다운로드 방식으로 동작한다.
+  icsEndpoint: 'https://bmedbitonzkggfenymog.supabase.co/functions/v1/uriday-ics',
 };

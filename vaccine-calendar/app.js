@@ -1,7 +1,8 @@
 import { BRAND } from '../shared/js/brand.js';
-import { parseDate, today, addDays, addMonths, diffDays, fmt, fmtShort, toISO, ageText } from '../shared/js/date-utils.js';
+import { parseDate, today, addMonths, diffDays, fmt, fmtShort, toISO, ageText } from '../shared/js/date-utils.js';
 import { downloadICS } from '../shared/js/ics.js';
-import { SCHEDULE_META, VACCINES, CHECKUPS, DENTAL_CHECKUPS } from './schedule-data.js';
+import { SCHEDULE_META } from './schedule-data.js';
+import { buildEvents } from './schedule-logic.js';
 
 // ---------- 상태 ----------
 const state = {
@@ -12,57 +13,6 @@ const state = {
 };
 
 const $ = (id) => document.getElementById(id);
-
-// ---------- 이벤트 목록 생성 ----------
-function resolveDate(birth, off) {
-  return addDays(addMonths(birth, off.m || 0), off.d || 0);
-}
-
-function ageLabel(off) {
-  const m = off.m || 0, d = off.d || 0;
-  if (m === 0 && d === 0) return '출생 직후';
-  if (m === 0) return `생후 ${d}일`;
-  if (m >= 48 && m % 12 === 0) return `만 ${m / 12}세`;
-  if (m >= 48) return `만 ${Math.floor(m / 12)}세`;
-  return `생후 ${m}개월`;
-}
-
-function buildEvents(birth) {
-  const events = [];
-  for (const v of VACCINES) {
-    for (const dose of v.doses) {
-      events.push({
-        key: `${v.id}-${dose.no}`,
-        cat: 'vaccine',
-        title: v.name,
-        doseLabel: dose.label,
-        windowText: dose.windowText,
-        note: dose.note || '',
-        optional: !!dose.optional,
-        start: resolveDate(birth, dose.start),
-        end: resolveDate(birth, dose.end),
-        groupLabel: ageLabel(dose.start),
-      });
-    }
-  }
-  for (const c of [...CHECKUPS, ...DENTAL_CHECKUPS]) {
-    const isDental = c.kind === 'dental';
-    events.push({
-      key: `${c.kind}-${c.round}`,
-      cat: 'checkup',
-      kind: c.kind,
-      title: isDental ? `영유아 구강검진 ${c.round}차` : `영유아 건강검진 ${c.round}차`,
-      doseLabel: '',
-      windowText: c.windowText,
-      note: c.focus || '',
-      start: resolveDate(birth, c.start),
-      end: resolveDate(birth, c.end),
-      groupLabel: ageLabel(c.start),
-    });
-  }
-  events.sort((a, b) => a.start - b.start || a.end - b.end);
-  return events;
-}
 
 function statusOf(ev) {
   const t = today();
@@ -105,6 +55,11 @@ function render() {
   const doneCount = events.filter((e) => state.done.has(e.key)).length;
   $('progText').textContent = `${doneCount} / ${events.length}`;
   $('progBar').style.width = `${events.length ? Math.round((doneCount / events.length) * 100) : 0}%`;
+
+  // 지난 일정 일괄 완료 버튼 (지난 미체크 항목이 있을 때만)
+  const pastPending = events.filter((e) => statusOf(e) === 'past');
+  $('bulkPastBtn').classList.toggle('hidden', pastPending.length === 0);
+  $('bulkPastBtn').dataset.count = pastPending.length;
 
   // 타임라인 (시작일 기준 그룹)
   const filtered = events.filter((e) => state.filter === 'all' || e.cat === state.filter);
@@ -253,16 +208,16 @@ function showICSGuide() {
   if (isIOS) {
     body.innerHTML = `
       <ol>
-        <li>다운로드가 끝나면 주소창 옆 <b>↓ 아이콘 → 다운로드 항목</b>에서 파일을 열어주세요.</li>
-        <li><b>"캘린더에 추가"</b>를 누르면 남은 일정이 한 번에 들어가요.</li>
+        <li>잠시 후 뜨는 화면에서 <b>"모두 추가"</b>(또는 "캘린더에 추가")를 누르면 끝!</li>
+        <li>화면이 안 뜨면: 주소창 옆 <b>↓ 아이콘 → 다운로드 항목</b>에서 파일을 열어주세요.</li>
       </ol>
       <div class="sheet-tip">알림도 함께 등록돼서 각 일정 7일 전에 미리 알려줘요.</div>`;
   } else if (isAndroid) {
     body.innerHTML = `
       <ol>
-        <li>다운로드된 <b>일정 파일(.ics)을 탭</b>해서 캘린더 앱으로 열어주세요.</li>
-        <li><b>삼성 캘린더</b>는 바로 전체 일정이 들어가요.</li>
-        <li><b>구글 캘린더 앱</b>에서 일부만 보이면: PC나 모바일 웹에서 calendar.google.com → 설정 → <b>가져오기</b>로 파일을 올리면 전체가 들어가요.</li>
+        <li>다운로드 알림에서 <b>일정 파일(.ics)을 탭</b>해 캘린더 앱으로 열어주세요.</li>
+        <li><b>삼성 캘린더</b>: 바로 전체 일정이 들어가요.</li>
+        <li><b>구글 캘린더 앱</b>에서 일부만 보이면: 브라우저에서 calendar.google.com → 설정 → <b>가져오기</b>에 파일을 올리면 전체가 들어가요.</li>
       </ol>
       <div class="sheet-tip">알림도 함께 등록돼서 각 일정 7일 전에 미리 알려줘요.</div>`;
   } else {
@@ -285,6 +240,16 @@ function onICS() {
     // 인스타 등 인앱 브라우저는 파일 다운로드가 막히는 경우가 많다
     showToast('⋯ 메뉴에서 "외부 브라우저로 열기" 후 다시 눌러주세요');
     $('inappBanner').classList.remove('hidden');
+    return;
+  }
+  if (BRAND.icsEndpoint) {
+    // 서버가 text/calendar MIME으로 직접 응답 → iOS는 "캘린더에 추가" 화면이 바로 뜬다
+    const u = new URL(BRAND.icsEndpoint);
+    u.searchParams.set('bd', toISO(state.birth));
+    if (state.name) u.searchParams.set('name', state.name);
+    if (state.done.size) u.searchParams.set('skip', [...state.done].join(','));
+    showICSGuide();
+    location.href = u.toString();
     return;
   }
   const babyLabel = state.name || '아기';
@@ -367,6 +332,16 @@ function init() {
   $('shareBtn').addEventListener('click', onShare);
   $('icsBtn').addEventListener('click', onICS);
   $('printBtn').addEventListener('click', () => window.print());
+  $('bulkPastBtn').addEventListener('click', () => {
+    const events = buildEvents(state.birth);
+    const past = events.filter((e) => statusOf(e) === 'past');
+    past.forEach((e) => state.done.add(e.key));
+    try {
+      localStorage.setItem(doneStorageKey(), JSON.stringify([...state.done]));
+    } catch (e) { /* ignore */ }
+    render();
+    showToast(`지난 일정 ${past.length}건을 완료로 표시했어요. 실제 접종 여부는 예방접종도우미에서 확인!`);
+  });
   $('icsGuideClose').addEventListener('click', () => $('icsGuide').classList.add('hidden'));
   $('icsGuide').addEventListener('click', (e) => {
     if (e.target === $('icsGuide')) $('icsGuide').classList.add('hidden');

@@ -110,6 +110,18 @@
   transition: width 0.4s ease;
 }
 
+.bulk-btn {
+  margin-top: 12px;
+  width: 100%;
+  padding: 11px;
+  border-radius: var(--radius-sm);
+  border: 1.5px dashed var(--sage);
+  background: var(--sage-soft);
+  color: var(--sage-deep);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
 /* ---------- 액션 버튼 ---------- */
 .actions {
   display: grid;
