@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>함께 육아일지 | uridaylog</title>
+  <meta name="description" content="엄마·아빠·시터가 같이 쓰는 육아일지. 가입 없이 탭 한 번으로 수유·기저귀·잠을 기록하고, 교대 요약을 카톡으로 보내요. 아기가 자라면 기록 버튼도 같이 레벨업!" />
+  <meta name="theme-color" content="#FBF6F0" id="themeColor" />
+  <meta name="color-scheme" content="light dark" />
+
+  <!-- Open Graph (카톡/인스타 공유 미리보기) -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="함께 육아일지 — 새벽 3시, 누가 언제 먹였더라?" />
+  <meta property="og:description" content="엄마·아빠·시터가 같이 쓰는 육아일지. 가입 없이, 탭 한 번으로." />
+  <meta property="og:locale" content="ko_KR" />
+  <meta property="og:url" content="https://wkdwlsgh29-del.github.io/uridaylog/baby-log/" />
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📒</text></svg>" />
+
+  <!-- 홈 화면 추가 (PWA) -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <meta name="apple-mobile-web-app-title" content="육아일지" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+
+  <!-- 밤 모드: 첫 페인트 전에 테마를 적용해 새벽에 흰 화면이 번쩍이지 않게 -->
+  <script>
+    try {
+      var t = localStorage.getItem('bl:theme');
+      if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+    } catch (e) { /* ignore */ }
+  </script>
+
+  <link rel="stylesheet" as="style" crossorigin
+    href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+  <link rel="stylesheet" href="../shared/css/base.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="shell">
+
+    <!-- 인앱 브라우저(카톡·인스타) 안내 -->
+    <div class="banner banner-gold hidden" id="inappBanner">
+      <div>📱 <b>카카오톡·인스타 안에서 열렸어요.</b> 여기서 쓰면 기록이 따로 저장돼요 —
+        오른쪽 위 <b>⋯ 메뉴 → 다른 브라우저로 열기</b>(사파리/크롬)로 열어야 기록이 안전하게 남아요.</div>
+      <button class="banner-btn" id="inappCopy">링크 복사</button>
+    </div>
+
+    <!-- 가족 연결이 끊긴 기기 -->
+    <div class="banner banner-danger hidden" id="revokedBanner">
+      <div>🔌 <b>이 기기의 가족 연결이 끊겼어요.</b> 기록은 이 기기에 그대로 있어요. 초대 링크를 다시 받아 참여해 주세요.</div>
+      <button class="banner-btn" id="revokedJoin">다시 참여</button>
+    </div>
+
+    <!-- ========== 첫 실행 ========== -->
+    <section id="onboard" class="hidden">
+      <header class="top">
+        <span class="brand-mark"><span class="logo">📒</span><span>함께 육아일지</span></span>
+        <a class="chip chip-brand" id="brandIg" href="#" target="_blank" rel="noopener">Instagram</a>
+      </header>
+
+      <div class="hero">
+        <h1>새벽 3시,<br /><em>누가 언제 먹였더라?</em></h1>
+        <p class="sub">엄마·아빠·시터가 같이 쓰는 육아일지.<br />가입 없이, 탭 한 번으로.</p>
+        <ul class="hero-points">
+          <li>🍼 수유·💧기저귀·😴잠을 <b>한 번 탭</b>으로</li>
+          <li>📋 교대할 땐 <b>카톡 한 줄 요약</b></li>
+          <li>🐣 아기가 크면 <b>기록 버튼도 레벨업</b></li>
+        </ul>
+      </div>
+
+      <form class="card input-card" id="onboardForm" novalidate>
+        <div class="row">
+          <label class="field-label" for="obName">아기 이름 <span class="optional-tag">(선택)</span></label>
+          <input class="field" type="text" id="obName" placeholder="예: 하린" maxlength="10" autocomplete="off" />
+        </div>
+        <div class="row">
+          <label class="field-label" for="obBirth">생년월일</label>
+          <input class="field" type="date" id="obBirth" required />
+        </div>
+        <div class="row">
+          <span class="field-label">나는</span>
+          <div class="role-chips" id="obRoles" role="radiogroup" aria-label="나는"></div>
+        </div>
+        <div class="row">
+          <label class="field-label" for="obMeName">부를 이름 <span class="optional-tag">(선택)</span></label>
+          <input class="field" type="text" id="obMeName" maxlength="12" autocomplete="off" />
+        </div>
+        <button class="btn btn-primary btn-block" type="submit" id="obStart">시작하기</button>
+        <button class="link-btn" type="button" id="obJoin">💌 초대 링크를 받았어요</button>
+        <button class="link-btn small" type="button" id="obRestore">백업 파일로 복원하기</button>
+      </form>
+    </section>
+
+    <!-- ========== 메인 ========== -->
+    <main id="main" class="hidden">
+      <header class="top top-main">
+        <span class="brand-mark"><span class="logo">📒</span><span class="brand-text">육아일지</span></span>
+        <div class="top-right">
+          <button class="sync-pill" id="syncPill" aria-label="공유 상태"><i class="dot" id="syncDot"></i><span id="syncText">이 기기만</span></button>
+          <button class="me-chip" id="meChip" aria-label="지금 기록하는 사람 바꾸기"></button>
+        </div>
+      </header>
+
+      <button class="baby-bar" id="babyBar" aria-label="성장 단계 보기"></button>
+
+      <div id="batonBanner"></div>
+
+      <section class="now" id="nowCards" aria-label="지금 상태"></section>
+
+      <section class="grid" id="grid" aria-label="빠른 기록"></section>
+      <button class="more-btn" id="moreBtn">⋯ 더보기 <span>모든 기록 종류</span></button>
+      <!-- 트림 확인 띠: 그리드 아래에 둔다 (나타나고 사라져도 그리드 버튼 위치가 흔들리지 않게) -->
+      <div id="burpStrip"></div>
+
+      <div id="hints"></div>
+
+      <section class="card today-card" id="todayCard"></section>
+
+      <section class="card tl-card">
+        <div class="tl-head">
+          <h2>기록</h2>
+          <div class="tabs" id="tlTabs" role="tablist">
+            <button class="tab active" data-tab="today" role="tab">오늘</button>
+            <button class="tab" data-tab="yesterday" role="tab">어제</button>
+          </div>
+        </div>
+        <div id="timeline"></div>
+        <button class="tl-more" id="tlMore">이전 기록 더 보기</button>
+      </section>
+
+      <section class="card team-card" id="teamCard"></section>
+
+      <nav class="tools" aria-label="도구">
+        <button class="tool" id="toolHandoff"><span class="t-emo">📋</span><span>교대 요약</span></button>
+        <button class="tool" id="toolLock"><span class="t-emo">🔒</span><span>잠금화면 기록</span></button>
+        <button class="tool" id="toolInvite"><span class="t-emo">👨‍👩‍👧</span><span>가족 초대</span></button>
+        <button class="tool" id="toolSettings"><span class="t-emo">⚙️</span><span>설정</span></button>
+      </nav>
+
+      <button class="btn btn-ghost btn-block install-btn hidden" id="installBtn">📲 홈 화면에 추가하고 앱처럼 쓰기</button>
+    </main>
+
+    <footer class="foot hidden" id="foot">
+      <a id="footIg" class="ig" href="#" target="_blank" rel="noopener">📷 <span id="footIgHandle"></span></a>
+      <div class="made">새벽에 바로 열 수 있게 홈 화면에 저장해 두세요 💛</div>
+      <p class="disclaimer" id="disclaimer"></p>
+    </footer>
+  </div>
+
+  <!-- 바텀 시트 (하나를 돌려 씀) -->
+  <div class="sheet-dim hidden" id="sheetDim">
+    <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+      <div class="sheet-head">
+        <h3 id="sheetTitle"></h3>
+        <button class="sheet-x" id="sheetClose" aria-label="닫기">✕</button>
+      </div>
+      <div class="sheet-body" id="sheetBody"></div>
+    </div>
+  </div>
+
+  <!-- 가운데 모달 (확인·레벨업·도감) -->
+  <div class="modal-dim hidden" id="modalDim">
+    <div class="modal" id="modal" role="alertdialog" aria-modal="true"></div>
+  </div>
+
+  <!-- 되돌리기 토스트 -->
+  <div class="undo" id="undo" role="status" aria-live="polite">
+    <span class="undo-text" id="undoText"></span>
+    <div class="undo-btns">
+      <button class="undo-btn" id="undoBtn">되돌리기</button>
+      <button class="undo-btn ghost" id="undoEdit">시간 수정</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <input type="file" id="restoreFile" accept="application/json,.json" class="hidden" />
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
