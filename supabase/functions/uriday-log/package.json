@@ -1,0 +1,13 @@
+{
+  "name": "uriday-log",
+  "private": true,
+  "type": "module",
+  "description": "uridaylog 함께 육아일지 — 동기화 Edge Function (로컬 테스트·개발 서버용 패키지)",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "dev": "node dev-server.mjs"
+  },
+  "devDependencies": {
+    "postgres": "^3"
+  }
+}
