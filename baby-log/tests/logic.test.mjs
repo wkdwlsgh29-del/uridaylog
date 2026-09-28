@@ -415,6 +415,32 @@ test('team: 가족 합계와 고마움만 — 사람별 횟수 없음', () => {
   assert.ok(!L.live([h, ev('ack', at(18, 5), { target: h.id })]).some((e) => e.type === 'ack'), 'ack 는 타임라인 행이 아님');
 });
 
+test('live(): 같은 배열이면 캐시(얼린 배열) · 고치기·지우기·추가·다른 탭 합치기(객체 교체)는 바로 반영', () => {
+  const a = ev('pee', at(10)), b = ev('poop', at(9)), c = ev('formula', at(11), { ml: 100 });
+  const events = [a, b, c];
+  const l1 = L.live(events);
+  assert.deepEqual(l1.map((e) => e.id), [b.id, a.id, c.id]);
+  assert.equal(L.live(events), l1, '바뀐 게 없으면 같은 결과를 다시 씀');
+  assert.ok(Object.isFrozen(l1));
+  assert.throws(() => l1.reverse(), TypeError, '공유 결과를 몰래 고칠 수 없음');
+  // store.updateEvent 처럼 제자리에서 시각을 바꾸고 updatedAt 을 올림 → 다시 정렬
+  a.ts = at(8); a.updatedAt += 1;
+  assert.deepEqual(L.live(events).map((e) => e.id), [a.id, b.id, c.id]);
+  // 지우기(툼스톤)
+  b.deleted = true; b.updatedAt += 1;
+  assert.deepEqual(L.live(events).map((e) => e.id), [a.id, c.id]);
+  // 추가
+  const d = ev('pee', at(12));
+  events.push(d);
+  assert.deepEqual(L.live(events).map((e) => e.id), [a.id, c.id, d.id]);
+  // 다른 탭 합치기: 객체를 새것으로 바꿈(updatedAt 이 더 큼)
+  events[0] = { ...a, ts: at(13), updatedAt: a.updatedAt + 5 };
+  assert.deepEqual(L.live(events).map((e) => e.id), [c.id, d.id, a.id]);
+  // 배열이 다르면 따로
+  assert.deepEqual(L.live([b]).map((e) => e.id), []);
+  assert.deepEqual(L.live(null), []);
+});
+
 test('memberColor · josa · memberName', () => {
   const ms = [{ id: 'a', role: 'mom' }, { id: 'b', role: 'grandma' }, { id: 'c', role: 'grandma' }];
   assert.equal(L.memberColor(ms[0], ms), D.ROLE_BY_ID.mom.color);

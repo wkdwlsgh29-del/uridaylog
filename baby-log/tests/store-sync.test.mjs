@@ -883,6 +883,75 @@ test('syncNow: 서버가 reset(커서가 이상함) 이면 처음부터 받고 �
   assert.ok(!server.calls[m].body.members.some((x) => x.id === bad.id));
 });
 
+test('syncNow: reset + more (여러 페이지) — 커서를 되돌려 끝까지 받고 멈춘다 (무한 반복·재다운로드 없음)', async () => {
+  browserEnv();
+  const server = makeServer({ pageLimit: 3, stringNums: true });
+  globalThis.fetch = server.fetch;
+  const A = setupShared();
+  for (let i = 0; i < 10; i++) St.addEvent(A, { type: 'pee', ts: at(8, i) }, at(8, i));
+  await Sy.createFamily(A, at(9));
+  const real = A.sync.rev;
+  assert.equal(real, Math.max(...peekEvents(server, A.sync.familyId).map((e) => e.rev)));
+  // 서버 DB 를 옮기는 등으로 커서가 서버 최대 rev 보다 커짐 → 서버가 reset:true 로 처음부터 3개씩
+  A.sync.rev = real + 10000;
+  A.events = A.events.slice(0, 2);   // 로컬에서 사라진 기록도 다시 받아야 함
+  const n0 = server.calls.length;
+  await Sy.syncNow(A, at(9, 5));
+  const calls = server.calls.slice(n0);
+  assert.equal(calls[0].body.since, real + 10000);
+  assert.equal(calls[1].body.since, 3, '리셋 뒤 커서는 첫 페이지 끝(3)으로 — 옛 큰 커서로 돌아가지 않음');
+  assert.ok(calls.length <= 5, `페이지 수만큼만 요청 (${calls.length})`);
+  assert.equal(A.events.length, 10);
+  assert.equal(A.sync.rev, real);
+  // 다음 동기화는 제자리 (아무것도 다시 받지 않음)
+  const n1 = server.calls.length;
+  const r = await Sy.syncNow(A, at(9, 6));
+  assert.equal(server.calls.length - n1, 1);
+  assert.equal(server.calls[n1].body.since, real);
+  assert.equal(r.changed, false);
+});
+
+test('많은 기록 공유 시작: create 는 500개 이하로 싣고, 나머지는 sync 가 500개 이하씩 나눠 보냄', async () => {
+  browserEnv();
+  const server = makeServer();
+  const LIMIT = 500;
+  // 실제 서버처럼 한 요청 500개 초과면 413
+  server.hook = async (b) => {
+    const list = b.a === 'create' ? b.events : b.push;
+    if (Array.isArray(list) && list.length > LIMIT) return new Response(JSON.stringify({ ok: false, error: 'too_large' }), { status: 413 });
+    return undefined;
+  };
+  globalThis.fetch = server.fetch;
+  const A = setupShared();
+  for (let i = 0; i < 1300; i++) St.addEvent(A, { type: i % 2 ? 'pee' : 'poop', ts: at(0) + i * MIN }, at(0) + i * MIN);
+  await Sy.createFamily(A, at(9));
+  const create = server.calls.find((c) => c.body.a === 'create');
+  assert.ok(create.body.events.length > 0 && create.body.events.length <= LIMIT, `create ${create.body.events.length}`);
+  const pushes = server.calls.filter((c) => c.body.a === 'sync').map((c) => c.body.push.length);
+  assert.ok(pushes.every((n) => n <= LIMIT), pushes.join(','));
+  assert.equal(peekEvents(server, A.sync.familyId).length, 1300);
+  assert.equal(A.events.filter((e) => e.dirty).length, 0);
+});
+
+test('pairId: 앱(sync.js)과 서버(handler.js)가 같은 대변 id 를 만든다 (알림 버튼 둘 다 · 응답 유실 중복 방지)', async () => {
+  const { pairId: serverPairId } = await import('../../supabase/functions/uriday-log/handler.js');
+  for (let i = 0; i < 50; i++) {
+    const id = crypto.randomUUID();
+    assert.equal(Sy.pairId(id), serverPairId(id));
+    assert.notEqual(Sy.pairId(id), id);
+    assert.equal(Sy.pairId(Sy.pairId(id)), id);
+  }
+  assert.equal(Sy.pairId('0F8E1C2A-3B4D-4E5F-8A6B-0123456789AB'), '0f8e1c2a-3b4d-4e5f-8a6b-fedcba987654');
+  // 수신함의 'both' 한 건 → 소변(id) + 대변(pairId(id))
+  browserEnv();
+  const s = setupShared();
+  const id = crypto.randomUUID();
+  const cache = await caches.open(Sy.SW_DATA_CACHE);
+  await cache.put(`http://localhost:5190/baby-log/__bl/inbox/${id}`, new Response(JSON.stringify({ id, type: 'both', ts: at(3), data: { src: 'notif' } })));
+  await Sy.drainInbox(s, at(3, 1));
+  assert.deepEqual(s.events.map((e) => [e.type, e.id]).sort(), [['pee', id], ['poop', serverPairId(id)]]);
+});
+
 // =====================================================================
 // 서비스워커 연결
 // =====================================================================

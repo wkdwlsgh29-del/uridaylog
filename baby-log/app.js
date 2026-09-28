@@ -211,12 +211,36 @@ function refreshSwConfig(force = false) {
   return writeSwConfig(state).catch(() => false);
 }
 
-/** 상태 바뀐 뒤: 저장 → 다시 그리기 → 공유 동기화 예약 → 서비스워커 설정 갱신 */
+// 저장은 화면을 먼저 그린 뒤에 (1년치 기록이면 JSON 한 덩어리가 1.5MB — 탭 반응을 늦추지 않게).
+// 화면이 가려지거나 페이지를 떠날 때는 바로 저장한다 (새벽에 기록하고 바로 잠가도 남도록).
+let saveT = null;
+function flushSave() {
+  if (!saveT) return true;
+  clearTimeout(saveT);
+  saveT = null;
+  const ok = save(state);
+  if (!ok) showToast('저장 공간이 부족해요 — 설정 > JSON 백업을 먼저 해 주세요', 4500);
+  return ok;
+}
+function saveSoon() {
+  if (!saveT) saveT = setTimeout(flushSave, 60);
+}
+window.addEventListener('pagehide', flushSave);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(); });
+
+/** 상태 바뀐 뒤: 저장(그린 뒤 곧바로) → 다시 그리기 → 공유 동기화 예약 → 서비스워커 설정 갱신 */
 function commit({ rerender = true } = {}) {
-  if (!save(state)) showToast('저장 공간이 부족해요 — 설정 > JSON 백업을 먼저 해 주세요', 4500);
+  saveSoon();
   if (rerender) render();
   autosync?.kick();
   refreshSwConfig();
+}
+
+/** 내용이 같으면 DOM 을 건드리지 않는다 (다시 배치·글자 모양 계산을 줄여 탭 반응을 빠르게) */
+function setHTML(el, html) {
+  if (!el || el._html === html) return;
+  el.innerHTML = html;
+  el._html = html;
 }
 
 // ---------- 테마 (밤 모드) ----------
@@ -275,7 +299,7 @@ function syncView() {
 
 function renderTop() {
   const m = me(state);
-  $('meChip').innerHTML = `<span>나 · ${esc(memberEmoji(m))} ${esc(memberName(m))}</span><span class="caret">▾</span>`;
+  setHTML($('meChip'), `<span>나 · ${esc(memberEmoji(m))} ${esc(memberName(m))}</span><span class="caret">▾</span>`);
   $('meChip').setAttribute('aria-label', `지금 기록하는 사람: ${memberName(m)} (바꾸기)`);
   const [cls, text] = syncView();
   $('syncPill').className = `sync-pill ${cls}`;
@@ -299,34 +323,35 @@ function renderBaby(c) {
       ? `<div class="bb-prog"><span class="bb-bar"><i style="width:${pct}%"></i></span><span>다음 단계 '${esc(st.next.name)}'까지 ${st.daysToNext}일</span></div>`
       : `<div class="bb-prog"><span class="bb-bar"><i style="width:100%"></i></span><span>마지막 단계까지 왔어요 — 함께 키운 팀 💛</span></div>`;
   }
-  $('babyBar').innerHTML = `
+  setHTML($('babyBar'), `
     <div class="bb-row">
       <span class="bb-name">${esc(babyName())} <span>· ${esc(ageTxt)}</span></span>
       <span class="stage-pill">${pill}</span>
-    </div>${prog}`;
+    </div>${prog}`);
 }
 
-// 다른 사람이 넘긴, 아직 내가 받지 않은 바통 (12시간 이내)
+// 다른 사람이 넘긴, 아직 아무도 받지 않은 바통 (12시간 이내).
+// 가족 중 누군가 '받았어요'를 눌렀으면 배너는 닫는다 (바통은 한 사람이 받으면 끝 — 타임라인 행에는 계속 '확인 ✓'과 버튼이 있음).
 function pendingBatons(t) {
-  const acked = new Set(state.events.filter((e) => !e.deleted && e.type === 'ack' && e.by === state.meId).map((e) => e.data?.target));
+  const acks = state.events.filter((e) => !e.deleted && e.type === 'ack' && e.data?.target);
   return live(state.events).filter((e) => e.type === 'handoff' && e.by && e.by !== state.meId
-    && t - e.ts < 12 * HOUR && e.ts <= t + 5 * MIN && !acked.has(e.id));
+    && t - e.ts < 12 * HOUR && e.ts <= t + 5 * MIN && !acks.some((a) => a.data.target === e.id && a.by !== e.by));
 }
 
 function renderBaton(c) {
   const list = pendingBatons(c.now);
   const e = list[list.length - 1];
-  if (!e) { $('batonBanner').innerHTML = ''; return; }
+  if (!e) { setHTML($('batonBanner'), ''); return; }
   const who = memberName(mem(e.by));
   const range = e.data?.from && e.data?.to ? `${fmtHM(e.data.from)}~${fmtHM(e.data.to)} 요약` : '교대 요약';
-  $('batonBanner').innerHTML = `
+  setHTML($('batonBanner'), `
     <div class="baton">
       <button class="baton-main" data-baton-view="${esc(e.id)}">
         <span class="baton-title">📋 ${esc(subj(who))} 바통을 넘겼어요</span>
         <span class="baton-sub">${esc(fmtTime(e.ts))} · ${esc(range)} 보기 ›</span>
       </button>
       <button class="baton-ack" data-ack="${esc(e.id)}">✅ 받았어요</button>
-    </div>`;
+    </div>`);
 }
 
 // ----- 지금 카드 -----
@@ -409,22 +434,22 @@ function renderNow(c) {
   } else {
     sleepCard = `<div class="nc"><div class="nc-label">😴 수면</div><div class="nc-empty">아직 기록이 없어요</div></div>`;
   }
-  $('nowCards').innerHTML = feedCard + diaperCard + sleepCard;
+  setHTML($('nowCards'), feedCard + diaperCard + sleepCard);
   renderBurp(c, fs);
 }
 
 // 트림 띠: 트림 단계에서 마지막 수유의 트림 여부를 아직 모를 때만
 function renderBurp(c, fs) {
   const el = $('burpStrip');
-  if (!fs.burpPending || !fs.last) { el.innerHTML = ''; return; }
+  if (!fs.burpPending || !fs.last) { setHTML(el, ''); return; }
   const e = fs.last;
   const d = describe(e);
-  el.innerHTML = `
+  setHTML(el, `
     <div class="burp-strip">
       <div class="bs-text">😮‍💨 트림했나요?<small>${esc(fmtHM(e.ts))} ${esc(typeMeta(e.type).label)}${d ? ` ${esc(d)}` : ''}</small></div>
       <button class="opt" data-burp="yes" data-id="${esc(e.id)}">✓ 했어요</button>
       <button class="opt" data-burp="no" data-id="${esc(e.id)}">안 했어요</button>
-    </div>`;
+    </div>`);
 }
 
 // ----- 퀵 그리드 -----
@@ -483,7 +508,7 @@ function cellHTML(id, c, ss, lastMap, cls = 'qbtn') {
 function renderGrid(c) {
   const ss = sleepState(state.events, c.now);
   const lastMap = lastByType(c.now);
-  $('grid').innerHTML = c.grid.map((id) => cellHTML(id, c, ss, lastMap)).join('');
+  setHTML($('grid'), c.grid.map((id) => cellHTML(id, c, ss, lastMap)).join(''));
 }
 
 // ----- 힌트 -----
@@ -493,12 +518,12 @@ function renderHints(c) {
   const off = state.prefs.hintsOff || {};
   const today = dayKey(c.now);
   const list = hints(c.stage, state.events, c.now, state.family).filter((h) => !(h.level === 'info' && off[h.id] === today));
-  $('hints').innerHTML = list.map((h) => `
+  setHTML($('hints'), list.map((h) => `
     <div class="hint ${h.level}" role="${h.level === 'urgent' ? 'alert' : 'note'}">
       <span class="h-ico">${HINT_ICON[h.level] || '🌿'}</span>
       <div class="h-body">${esc(h.text)}${h.link ? `<br /><a href="${esc(h.link)}">${esc(HINT_LINK[h.id] || '자세히 보기 →')}</a>` : ''}</div>
       ${h.level === 'info' ? `<button class="hint-x" data-hint-x="${esc(h.id)}" aria-label="오늘은 그만 보기">✕</button>` : ''}
-    </div>`).join('');
+    </div>`).join(''));
 }
 
 // ----- 오늘 카드 -----
@@ -542,7 +567,7 @@ function renderToday(c) {
     const streakTxt = streak > 0 ? `🔥 함께 기록 ${streak}일째` : (total ? '🌿 쉬어가도 괜찮아요 — 하나 기록하면 다시 시작해요' : '');
     html += `<div class="streak-line">${esc([streakTxt, total ? `우리 팀 기록 ${fmtNum(total)}개` : ''].filter(Boolean).join(' · '))}</div>`;
   }
-  $('todayCard').innerHTML = html;
+  setHTML($('todayCard'), html);
 }
 
 // ----- 타임라인 -----
@@ -651,7 +676,7 @@ function renderTimeline(c) {
     any = true;
     html += `<ul class="tl-list">${groupRows(list).map((r) => rowHTML(r, c, rx)).join('')}</ul>`;
   }
-  $('timeline').innerHTML = html;
+  setHTML($('timeline'), html);
   const oldest = addDaysTs(c.now, -(base + ui.extraDays));
   const hasOlder = all.length && all[0].ts < oldest;
   $('tlMore').classList.toggle('hidden', !hasOlder || ui.extraDays >= 60);
@@ -670,13 +695,13 @@ function renderTeam(c) {
     if (streak > 0) lines.push(`🔥 함께 기록 <b>${streak}</b>일째`);
   }
   lines.push(`💛 이번 주 서로 주고받은 고마움 <b>${t.weekThanks}</b>개`);
-  $('teamCard').innerHTML = `
+  setHTML($('teamCard'), `
     <h2>🤝 오늘 함께한 우리 팀</h2>
     <div class="team-big">${t.total ? `오늘 우리 팀 기록 <b>${t.total}</b>개 — 다들 수고 많았어요` : '오늘은 아직 조용해요 — 첫 기록을 남겨 볼까요?'}</div>
     <ul class="team-lines">${lines.map((l) => `<li>${l}</li>`).join('')}<li>함께하는 사람: ${people}</li></ul>
     ${t.lastThanksToMe ? `<div class="team-thx">${esc(t.lastThanksToMe.text)}</div>` : ''}
     <div class="team-note">${t.weekThanks ? '"누가 더"가 아니라 "함께" — 기록마다 누가 했는지는 정보로만 남아요.' : '다른 사람 기록 옆 🤍를 누르면 고마움을 전할 수 있어요.'}</div>
-    <button class="btn btn-ghost btn-block" data-handoff="1" style="margin-top:12px">📋 바통 넘기기 (교대 요약)</button>`;
+    <button class="btn btn-ghost btn-block" data-handoff="1" style="margin-top:12px">📋 바통 넘기기 (교대 요약)</button>`);
 }
 
 // ----- 30초 타이머: 경과 시간 글자만 -----
@@ -763,7 +788,20 @@ function afterRender(c) {
       announce(`✅ ${subj(memberName(mem(lastAck.by)))} 바통을 받았어요`, 3500);
     }
   }
+  // 관리자(보통 공유를 켠 사람)에게 한 번만: 관리자를 한 명 더 (폰 분실 시 '기기 연결 해제'를 해 줄 사람)
+  if (state.sync.token && !state.sync.revoked && state.sync.isAdmin && !p.adminNudged && !modalBusy && needSecondAdmin()) {
+    p.adminNudged = true;
+    dirty = true;
+    announce(`👑 ${ADMIN_NUDGE} (설정 → 가족 멤버)`, 5000);
+  }
   if (dirty) save(state);
+}
+
+// 관리자가 나 혼자인데 다른 사람이 기기로 참여해 있음 → 폰을 잃어버리면 관리할 사람이 없다
+const ADMIN_NUDGE = '폰을 잃어버려도 괜찮게 관리자를 한 명 더 지정해 두세요';
+function needSecondAdmin() {
+  const act = activeMembers();
+  return act.filter((m) => m.isAdmin).length === 1 && act.some((m) => !m.isAdmin && m.claimed);
 }
 
 // 내 기록에 다른 사람이 보낸 고마워요·확인 id 목록
@@ -784,10 +822,13 @@ function freshReactions() {
 // ============================================================
 function flash(el) {
   if (!el) return;
-  el.classList.remove('flash');
-  void el.offsetWidth;
-  el.classList.add('flash');
-  setTimeout(() => el.classList.remove('flash'), 750);
+  // offsetWidth 로 강제 배치하지 않는다 (기록이 많을 때 탭마다 수십 ms). 이미 반짝이는 중이면 다음 프레임에 다시.
+  if (el.classList.contains('flash')) {
+    el.classList.remove('flash');
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('flash')));
+  } else el.classList.add('flash');
+  clearTimeout(el._flashT);
+  el._flashT = setTimeout(() => el.classList.remove('flash'), 750);
 }
 
 /** 퀵 그리드·더보기 버튼 */
@@ -1783,10 +1824,10 @@ function openMemberSheet(id) {
       <div class="sec"><div class="sec-title">관리 (👑 관리자)</div>
         <div class="sheet-actions" style="margin-top:0">
           <button class="btn btn-ghost btn-block" data-admin="${m.isAdmin ? 0 : 1}">${m.isAdmin ? '관리자 해제' : '👑 관리자로 지정'}</button>
-          ${m.claimed ? '<button class="btn btn-ghost btn-block" data-unlink="1">기기 연결만 끊기 (폰을 잃어버렸을 때)</button>' : ''}
+          ${m.claimed ? '<button class="btn btn-ghost btn-block" data-unlink="1">📵 기기 연결 해제(폰 분실 시)</button>' : ''}
           <button class="btn btn-danger btn-block" data-remove="1">가족에서 내보내기</button>
         </div>
-        <p class="sheet-note">내보내도 그동안의 기록은 남아요. 그 사람의 기기 연결은 끊겨요.</p></div>` : ''}`;
+        <p class="sheet-note">${m.claimed ? '<b>기기 연결 해제</b>: 가족에서 내보내지 않고 그 사람 폰의 연결만 끊어요. 새 폰에서 초대 링크로 다시 이 사람을 고르면 이어서 써요.<br />' : ''}<b>내보내기</b>: 그동안의 기록은 남고, 그 사람의 기기 연결도 끊겨요.</p></div>` : ''}`;
   f.emoji = m.emoji;
   openSheet(`${m.emoji} ${memberName(m)}`, html, {
     onClick: async (e) => {
@@ -1879,10 +1920,9 @@ function openInviteSheet() {
     : `<div class="honest">${admin ? '초대 링크를 새로 만들어 보내 주세요.' : `초대 링크는 관리자(👑 ${esc(adminNames || '만든 사람')})가 보낼 수 있어요.`}</div>`}
     ${admin ? `<button class="btn btn-ghost btn-block" data-rotate="1" style="margin-top:10px">${link ? '🔄 새 초대 링크 만들기 (옛 링크는 막혀요)' : '초대 링크 만들기'}</button>` : ''}
     <div class="divider"></div>
-    <div class="sec"><div class="sec-title">📱 내 다른 기기에서도 쓰기</div>
-      <p class="sheet-note" style="margin-top:0">사파리에서 쓰다가 홈 화면 앱으로 옮길 때, 태블릿에서도 쓸 때 — 1회용 연결 코드(15분)를 만들어 새 기기에서 붙여 넣으세요.</p>
-      <div id="devBox"></div>
-      <button class="btn btn-ghost btn-block" data-dev="1" style="margin-top:8px">연결 코드 만들기</button>
+    <div class="sec"><div class="sec-title">📱 내 다른 기기 연결</div>
+      <p class="sheet-note" style="margin-top:0">초대 링크는 <b>새로 참여하는 사람</b>용이에요. 나의 홈 화면 앱·태블릿 같은 <b>내 다른 기기</b>는 1회용 연결 링크(15분)로 이어 주세요.</p>
+      <button class="btn btn-ghost btn-block" data-dev="1" style="margin-top:8px">내 다른 기기 연결</button>
     </div>`;
   openSheet('👨‍👩‍👧 가족 초대', html, {
     onClick: async (e) => {
@@ -1898,25 +1938,71 @@ function openInviteSheet() {
         try { await rotateInvite(state); save(state); openInviteSheet(); showToast('새 초대 링크를 만들었어요'); } catch (err) { showToast(errMsg(err), 3500); rot.disabled = false; }
         return;
       }
-      const dv = e.target.closest('[data-dev]');
-      if (dv) {
-        dv.disabled = true;
-        try {
-          const r = await createDeviceLink(state);
-          const until = r.expiresAt ? fmtHM(r.expiresAt) : '15분 뒤';
-          $('devBox').innerHTML = `<div class="code-big">${esc(r.code)}</div>
-            <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
-              <button class="btn btn-ghost btn-sm" data-devcopy="${esc(r.code)}">코드 복사</button>
-              <button class="btn btn-ghost btn-sm" data-devlink="${esc(r.link)}">링크 복사</button></div>
-            <p class="sheet-note">${esc(until)}까지 한 번만 쓸 수 있어요. 새 기기에서 <b>초대 링크를 받았어요</b> → 붙여넣기.</p>`;
-        } catch (err) { showToast(errMsg(err), 3500); }
-        dv.disabled = false;
-        return;
+      if (e.target.closest('[data-dev]')) openDeviceLinkSheet();
+    },
+  });
+}
+
+// ----- 내 다른 기기 연결: 1회용·15분 연결 링크(#dev=) — 같은 사람의 두 번째 기기 (초대 링크로는 이미 쓰는 사람을 고를 수 없음) -----
+async function openDeviceLinkSheet() {
+  if (!state.sync.token || state.sync.revoked) { showToast(ERROR_COPY.not_shared); return; }
+  const who = mem(state.sync.memberId) || me(state);
+  const html = `
+    <div class="honest">📱 새 기기(또는 홈 화면 앱)에서 아래 링크를 열거나, 앱 첫 화면의 <b>초대 링크를 받았어요</b>에 코드를 붙여 넣으면 <b>${esc(euro(memberName(who)))}</b> 연결돼요.</div>
+    <div id="devBox" style="margin-top:12px"><p class="sheet-note">연결 링크를 만드는 중…</p></div>
+    ${isIOS ? '<p class="sheet-note warn">📲 홈 화면 앱·사파리·카톡은 저장소가 따로라 각각 연결해야 해요.</p>' : '<p class="sheet-note">💡 홈 화면 앱·사파리·카톡은 저장소가 따로라 각각 연결해야 해요.</p>'}
+    <p class="sheet-note">🔒 이 링크는 비밀번호와 같아요 — 나만 쓰세요. 다른 가족은 <b>가족 초대</b> 링크로 참여해요.</p>`;
+  let timer = null;
+  const stop = () => { clearInterval(timer); timer = null; };
+  const make = async () => {
+    stop();
+    const box = $('devBox');
+    if (!box) return;
+    box.innerHTML = '<p class="sheet-note">연결 링크를 만드는 중…</p>';
+    let r;
+    try {
+      r = await createDeviceLink(state);
+      save(state);
+    } catch (err) {
+      if ($('devBox')) $('devBox').innerHTML = `<p class="sheet-note warn">${esc(errMsg(err))}</p><button class="btn btn-ghost btn-block" data-devnew="1" style="margin-top:8px">다시 만들기</button>`;
+      if (state.sync.revoked) render();
+      return;
+    }
+    if (!$('devBox')) return;
+    const exp = r.expiresAt || Date.now() + 15 * MIN;
+    const key = r.code;   // 이 타이머가 그리는 칸 표시 (시트를 다시 열어 새 코드가 나오면 옛 타이머는 멈춤)
+    $('devBox').innerHTML = `
+      <div class="invite-link" id="devLinkText">${esc(r.link)}</div>
+      <div class="code-big" style="margin-top:8px" aria-label="연결 코드">${esc(r.code)}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+        <button class="btn btn-primary btn-sm" data-devlink="${esc(r.link)}">링크 복사</button>
+        <button class="btn btn-ghost btn-sm" data-devcopy="${esc(r.code)}">코드 복사</button></div>
+      <p class="sheet-note" id="devLeft" data-k="${esc(key)}"></p>`;
+    const tickLeft = () => {
+      const el = $('devLeft');
+      if (!el || el.dataset.k !== key) { stop(); return; }   // 다른 시트로 바뀜
+      const left = Math.max(0, Math.round((exp - Date.now()) / 1000));
+      if (left > 0) {
+        el.innerHTML = `⏳ <b>${Math.floor(left / 60)}:${pad2(left % 60)}</b> 남음 · 한 번만 쓸 수 있어요 (새로 만들면 이 링크는 막혀요)`;
+      } else {
+        stop();
+        el.classList.add('warn');
+        el.innerHTML = '⌛ 연결 링크가 만료됐어요.';
+        $('devBox').insertAdjacentHTML('beforeend', '<button class="btn btn-ghost btn-block" data-devnew="1" style="margin-top:8px">새로 만들기</button>');
       }
+    };
+    tickLeft();
+    timer = setInterval(tickLeft, 1000);
+  };
+  openSheet('📱 내 다른 기기 연결', html, {
+    onMount: () => { make(); },
+    onClose: stop,
+    onClick: (e) => {
       const dc = e.target.closest('[data-devcopy]');
       if (dc) { copyText(dc.dataset.devcopy, '코드를 복사했어요'); return; }
       const dl = e.target.closest('[data-devlink]');
-      if (dl) copyText(dl.dataset.devlink, '연결 링크를 복사했어요');
+      if (dl) { copyText(dl.dataset.devlink, '연결 링크를 복사했어요 — 새 기기에서 열어 주세요'); return; }
+      if (e.target.closest('[data-devnew]')) make();
     },
   });
 }
@@ -1991,16 +2077,25 @@ async function doPeek() {
   }
   if (info.kind === 'device') {
     const m = info.member || info.members[0] || {};
+    // 원래 폰에서 자기 연결 링크를 연 경우 — 끊고 다시 연결하지 않게 (1회용 코드도 아낌)
+    if (state.sync.token && !state.sync.revoked && m.id && m.id === state.sync.memberId) {
+      pendingJoin = '';
+      stripJoinHash();
+      body.innerHTML = `<div class="honest">👍 이 기기는 이미 <b>${esc(euro(m.name || '가족'))}</b> 연결돼 있어요.</div>
+        <p class="sheet-note">이 링크는 <b>새 기기</b>(또는 홈 화면 앱)에서 열어 주세요. 15분 안에 한 번만 쓸 수 있어요.</p>`;
+      joinCtl.onClick = null;
+      return;
+    }
     body.innerHTML = `
-      <div class="honest">📱 이 기기를 <b>${esc(famName)} 육아일지</b>의 <b>${esc(m.emoji || '')} ${esc(euro(m.name || '가족'))}</b> 연결해요.</div>
+      <div class="honest">📱 <b>${esc(m.emoji || '')} ${esc(euro(m.name || '가족'))} 이 기기를 연결할까요?</b><br />${esc(famName)} 육아일지 · 내 다른 기기 연결 링크(1회용)</div>
       <div class="sheet-actions"><button class="btn btn-primary btn-block" data-join="1">연결하기</button></div>`;
   } else {
     const names = info.members.filter((m) => m.claimed).map((m) => m.name).join('·');
     body.innerHTML = `
       <div class="honest"><b>${esc(famName)} 육아일지</b>${names ? ` (${esc(names)} 참여중)` : ''}</div>
       ${info.members.length ? `<div class="sec"><div class="sec-title">저는 이 사람이에요</div>
-        <div class="opts cols-2">${info.members.map((m) => `<button type="button" class="opt" data-grp="claim" data-val="${esc(m.id)}" ${m.claimed ? 'disabled' : ''}>${esc(m.emoji || '🙂')} ${esc(m.name)}${m.claimed ? '<small style="display:block;font-size:11px;font-weight:600">이미 연결됨</small>' : ''}</button>`).join('')}</div>
-        ${info.members.some((m) => m.claimed) ? '<p class="sheet-note">이미 연결된 사람의 새 기기라면: 그 사람 폰의 <b>가족 초대 → 내 다른 기기에서도 쓰기</b> 코드를 붙여 넣어 주세요.</p>' : ''}</div>` : ''}
+        <div class="opts cols-2">${info.members.map((m) => `<button type="button" class="opt${m.claimed ? ' stacked' : ''}" data-grp="claim" data-val="${esc(m.id)}" ${m.claimed ? 'disabled aria-disabled="true"' : ''}>${esc(m.emoji || '🙂')} ${esc(m.name)}${m.claimed ? '<small style="display:block;font-size:11px;font-weight:600">다른 기기에서 사용 중</small>' : ''}</button>`).join('')}</div>
+        ${info.members.some((m) => m.claimed) ? '<p class="sheet-note">내 폰이 이미 연결돼 있고 이 기기를 더 쓰려면: 원래 폰의 <b>설정 → 내 다른 기기 연결</b> 링크를 여기서 열어 주세요.</p>' : ''}</div>` : ''}
       <div class="sec"><div class="sec-title">처음 참여해요</div>
         <div class="role-chips">${ROLES.map((r) => `<button type="button" class="opt" data-grp="role" data-val="${r.id}">${r.emoji} ${esc(r.label)}</button>`).join('')}</div>
         <input class="field" id="joinName" maxlength="${LIMITS.memberName}" placeholder="${esc(NAME_PLACEHOLDER.default)}" style="margin-top:10px" autocomplete="off" /></div>
@@ -2072,7 +2167,7 @@ async function runJoin(code, opts, famName, btn) {
   } catch (err) {
     let msg = errMsg(err);
     if ((err?.code === 'forbidden' || err?.status === 403) && (!err.message || err.message === ERROR_COPY.forbidden)) {
-      msg = '이미 다른 기기가 연결된 사람이에요. 그 사람 폰의 [가족 초대 → 내 다른 기기에서도 쓰기] 코드를 붙여 넣어 주세요';
+      msg = '이미 다른 기기에서 쓰는 사람이에요. 그 사람 폰의 [설정 → 내 다른 기기 연결] 링크로 연결해 주세요';
     }
     if (err?.code === 'already_shared') msg = ERROR_COPY.already_shared;
     showToast(msg, 4500);
@@ -2145,7 +2240,7 @@ function openLockSheet(tab = isAndroid ? 'android' : 'ios') {
   const needShare = `
     <div class="honest">🔒 잠금화면 기록은 <b>'가족 공유'를 켜면</b> 쓸 수 있어요 (아이폰은 단축어가 서버로 바로 기록해요).</div>
     ${canShare() ? '<div class="sheet-actions"><button class="btn btn-primary btn-block" data-invite="1">가족 공유 켜기</button></div>' : '<p class="sheet-note">🌱 가족 공유는 곧 열려요. 그동안은 앱을 홈 화면에 추가해 두면 <b>앱 첫 화면에서 언제나 한 번 탭</b>으로 기록돼요.</p>'}`;
-  const secretWarn = '<p class="sheet-note danger">🔑 이 주소는 비밀번호와 같아요 — 다른 사람에게 보내지 마세요. 유출됐다면 관리자에게 <b>설정 → 가족 멤버 → 기기 연결 끊기</b>를 부탁하고 다시 참여해 주세요.</p>';
+  const secretWarn = '<p class="sheet-note danger">🔑 이 주소는 비밀번호와 같아요 — 다른 사람에게 보내지 마세요. 유출됐다면 관리자에게 <b>설정 → 가족 멤버 → 기기 연결 해제(폰 분실 시)</b>를 부탁한 뒤, 초대 링크로 나를 다시 골라 참여해 주세요.</p>';
 
   // ---- 아이폰 ----
   let ios = '';
@@ -2344,6 +2439,7 @@ function openSettingsSheet() {
           <span class="m-body"><span class="m-name">${esc(memberName(m))}${m.isAdmin ? ' 👑' : ''}</span><span class="m-sub" style="display:block">${esc(ROLE_BY_ID[m.role]?.label || '')}${m.id === state.meId ? ' · 나' : ''}</span></span>
           ${m.revoked ? '<span class="m-tag">나감</span>' : shared ? (m.claimed ? '<span class="m-tag ok">연결됨</span>' : '<span class="m-tag">기록만</span>') : ''}
         </button></li>`).join('')}</ul>
+      ${shared && state.sync.isAdmin && needSecondAdmin() ? `<p class="sheet-note warn">👑 ${esc(ADMIN_NUDGE)} — 사람을 눌러 <b>관리자로 지정</b>할 수 있어요.</p>` : ''}
       <button class="btn btn-ghost btn-block" data-add-member="1" style="margin-top:8px">+ 사람 추가</button></div>
 
     <div class="sec"><div class="sec-title">🔘 퀵버튼 편집 <span class="sub">${esc(c.stage.name)} 단계 · 체크한 버튼이 첫 화면에</span></div>
@@ -2369,6 +2465,7 @@ function openSettingsSheet() {
     <div class="sec"><div class="sec-title">🔗 공유</div>
       ${shared ? `
         ${state.sync.isAdmin ? '<button class="btn btn-ghost btn-block btn-sm" data-invite="1">초대 링크 보기 · 새로 만들기</button>' : '<button class="btn btn-ghost btn-block btn-sm" data-invite="1">가족 초대</button>'}
+        <button class="btn btn-ghost btn-block btn-sm" data-devlink-open="1" style="margin-top:8px">📱 내 다른 기기 연결</button>
         <button class="btn btn-ghost btn-block btn-sm" data-leave="1" style="margin-top:8px">이 기기 공유 끊기</button>`
       : `<button class="btn btn-ghost btn-block btn-sm" data-invite="1">${canShare() ? '가족 공유 켜기' : '가족 공유 (곧 열려요)'}</button>
          <button class="btn btn-ghost btn-block btn-sm" data-join="1" style="margin-top:8px">초대 링크로 참여하기</button>`}</div>
@@ -2432,6 +2529,7 @@ function openSettingsSheet() {
       if (e.target.closest('[data-json]')) { exportJSON(); return; }
       if (e.target.closest('[data-restore]')) { $('restoreFile').click(); return; }
       if (e.target.closest('[data-invite]')) { openInviteSheet(); return; }
+      if (e.target.closest('[data-devlink-open]')) { openDeviceLinkSheet(); return; }
       if (e.target.closest('[data-join]')) { openJoinSheet(''); return; }
       if (e.target.closest('[data-leave]')) {
         const ok = await ask({ emoji: '🔌', title: '이 기기의 공유를 끊을까요?', body: '이 기기 기록은 그대로 남고, 가족 기록도 다른 기기에 남아요. 다시 참여하려면 초대 링크가 필요해요.', buttons: [{ label: '끊기', value: true, kind: 'danger' }, { label: '취소', value: false }], dismiss: false });
@@ -2498,6 +2596,8 @@ async function wipeAll() {
   if (state.sync.token && !state.sync.revoked) { try { await leaveFamily(state); } catch (e) { /* 계속 */ } }
   await closeQuickNotifs();
   // 순서 중요: 옛 state 를 다시 저장하는 코드가 끼어들지 않게 지우기 직전에 새 상태로 바꾼다
+  clearTimeout(saveT);
+  saveT = null;
   state = defaultState();
   wipe();
   await clearSwData();
@@ -2527,7 +2627,7 @@ function onInstall() {
         <li>Safari 하단(또는 상단)의 <b>공유 버튼 ⬆︎</b>을 눌러주세요.</li>
         <li>목록에서 <b>"홈 화면에 추가"</b>를 선택하고 <b>추가</b>를 누르면 끝!</li>
       </ol>
-      <p class="sheet-note">⚠️ 아이폰은 사파리·홈 화면 앱·카톡 안 브라우저의 저장 공간이 <b>따로따로</b>예요. 홈 화면 앱을 처음 열면 <b>초대 링크를 받았어요</b>에 초대 링크(또는 <b>가족 초대 → 내 다른 기기에서도 쓰기</b> 코드)를 붙여 넣어 이어서 쓰세요. 공유 전이라면 설정 → JSON 백업으로 옮길 수 있어요.</p>`
+      <p class="sheet-note">⚠️ 아이폰은 사파리·홈 화면 앱·카톡 안 브라우저의 저장 공간이 <b>따로따로</b>예요. 홈 화면 앱을 처음 열면 <b>초대 링크를 받았어요</b>에 원래 쓰던 곳의 <b>설정 → 내 다른 기기 연결</b> 링크(또는 코드)를 붙여 넣어 이어서 쓰세요. 공유 전이라면 설정 → JSON 백업으로 옮길 수 있어요.</p>`
     : `<ol class="steps">
         <li>브라우저 <b>⋮ 메뉴</b>를 눌러주세요.</li>
         <li><b>"홈 화면에 추가"</b>(또는 "앱 설치")를 선택하면 끝!</li>

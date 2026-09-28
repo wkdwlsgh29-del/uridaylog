@@ -265,12 +265,38 @@ export function cleanData(type, data, ts = null) {
 }
 
 // ---------- 기록 조회 ----------
-/** 살아 있는 기록: 지우지 않았고 반응(고마워요·확인)이 아닌 것, 시각 오름차순 (복사본) */
+// live() 결과 캐시: 한 번 그릴 때 카드마다 live() 를 부르는데, 1년치(7천 개+)를 매번 거르고 정렬하면 탭이 느려진다.
+// 키 = 배열 자체 + 길이 + 지문(ts·updatedAt·deleted·type 을 한 번 훑어 만든 32비트 값 — 정렬보다 훨씬 싸다).
+// 기록을 고치는 모든 길(store.js·sync.js 병합·다른 탭 합치기)은 updatedAt 을 올리거나 배열을 바꾸므로 지문이 달라진다.
+const liveCache = new WeakMap();
+function eventsPrint(events) {
+  let h = events.length | 0;
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i];
+    if (!e) { h = (Math.imul(h, 31) + 7) | 0; continue; }
+    h = (Math.imul(h, 31) + (e.ts | 0)) | 0;
+    h = (Math.imul(h, 31) + (e.updatedAt | 0)) | 0;
+    h = (Math.imul(h, 31) + (e.deleted ? 1 : 2)) | 0;
+    const t = typeof e.type === 'string' ? e.type : '';
+    h = (Math.imul(h, 31) + t.length * 131 + (t.charCodeAt(0) | 0) + (t.charCodeAt(t.length - 1) | 0)) | 0;
+  }
+  return h;
+}
+
+/**
+ * 살아 있는 기록: 지우지 않았고 반응(고마워요·확인)이 아닌 것, 시각 오름차순.
+ * ⚠ 같은 기록 배열이면 같은 (얼린) 배열을 돌려준다 — 고치려면 복사해서 ([...live(x)].reverse()).
+ */
 export function live(events) {
   if (!Array.isArray(events)) return [];
-  return events
+  const print = eventsPrint(events);
+  const hit = liveCache.get(events);
+  if (hit && hit.len === events.length && hit.print === print) return hit.out;
+  const out = Object.freeze(events
     .filter((e) => e && !e.deleted && !REACTIONS.has(e.type) && isNum(e.ts))
-    .sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    .sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)));
+  liveCache.set(events, { len: events.length, print, out });
+  return out;
 }
 
 /** 소변으로 세는 기록인지 (소변 + 변기 쉬 성공) */

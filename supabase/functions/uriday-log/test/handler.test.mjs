@@ -5,7 +5,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import postgres from 'postgres';
-import { createHandler, sha256hex } from '../handler.js';
+import { createHandler, sha256hex, pairId } from '../handler.js';
 
 const BASE = process.env.DATABASE_URL || 'postgresql://postgres@localhost:54329/babylog';
 const TEST_DB = 'uriday_test_handler';
@@ -796,6 +796,28 @@ test('quick: 모든 종류 + 본문 형식 무관 + 토큰 위치·공백 무관
   const again = await pullAll(k);
   assert.equal(again.get(id).data.src, 'notif');
   assert.equal([...again.values()].filter((e) => e.id === id).length, 1);
+
+  // 'both' + id: 대변 id 는 pairId(id) (앱 수신함과 같은 계산) → 응답 유실 후 앱이 수신함으로 다시 올려도 중복 없음
+  const bid = uuid();
+  assert.match(await ok({ k, t: 'both', src: 'notif', id: bid }), /^✓ 소변·대변 기록/);
+  const pid = pairId(bid);
+  const ids = new Set((await pullAll(k)).keys());
+  assert.ok(ids.has(bid) && ids.has(pid), '소변 = id, 대변 = pairId(id)');
+  assert.match(await ok({ k, t: 'both', src: 'notif', id: bid }), /^✓ 이미 기록돼 있어요/);
+  // 앱 수신함 경로: 같은 두 id 를 sync 로 올려도 새 기록이 생기지 않음 (LWW 로 기존 것 유지)
+  const before = (await sql`select count(*)::int as n from uriday.events where family_id = ${f.familyId}`)[0].n;
+  const r = await sync(k, 0, { push: [ev('pee', { src: 'notif' }, { id: bid, updatedAt: T0 }), ev('poop', { src: 'notif' }, { id: pid, updatedAt: T0 })] });
+  assert.equal(r.status, 200, r.text);
+  const after_ = (await sql`select count(*)::int as n from uriday.events where family_id = ${f.familyId}`)[0].n;
+  assert.equal(after_, before);
+});
+
+test('pairId: 결정적 · uuid 모양 유지 · 두 번 적용하면 원래 id · 대문자 입력도 소문자로', () => {
+  const id = '0f8e1c2a-3b4d-4e5f-8a6b-0123456789ab';
+  assert.equal(pairId(id), '0f8e1c2a-3b4d-4e5f-8a6b-fedcba987654');
+  assert.equal(pairId(pairId(id)), id);
+  assert.equal(pairId(id.toUpperCase()), pairId(id));
+  assert.match(pairId('nope'), /^[0-9a-f-]{36}$/);
 });
 
 test('quick: 트림 붙이기(90분 안 마지막 수유) · 잠 토글(시간 계산) · 서울 날짜 경계', async () => {

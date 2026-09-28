@@ -23,9 +23,11 @@ self.addEventListener('install', (e) => {
 });
 
 self.addEventListener('activate', (e) => {
+  // 옛 캐시 정리는 이 도구('uriday-vc-')의 것만 — 같은 주소(github.io/uridaylog/)의 다른 도구
+  // (예: 함께 육아일지의 'uriday-bl-*' 캐시·알림 수신함)를 지우면 안 된다.
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('uriday-vc-') && k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });

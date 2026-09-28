@@ -78,3 +78,10 @@ DATABASE_URL=postgresql://postgres@localhost:54329/babylog node dev-server.mjs  
     `handler.js` 의 TYPES 를 함께 바꾼다 (서버가 모르는 종류는 거부된다).
   - `baby-log/sw.js` 의 `CACHE` 이름은 앱 파일 구성이 크게 바뀔 때만 올린다. 데이터 캐시 `uriday-bl-data`
     (알림 버튼 설정·수신함)는 이름을 바꾸지 않는다 — 바꾸면 아직 가져오지 않은 알림 기록이 사라질 수 있다.
+  - 모든 도구가 같은 출처(`github.io/uridaylog/`)라 Cache Storage 를 함께 쓴다. 각 도구의 `sw.js` 는 activate 때
+    **자기 접두사 캐시만** 지운다 (`uriday-vc-*`, `uriday-bl-*`) — 새 도구를 만들 때도 같은 규칙을 지킬 것.
+  - '둘 다'(소변+대변) 알림 기록의 대변 id 는 `handler.js` 와 `baby-log/sync.js` 의 `pairId()` 가 같은 계산으로 만든다
+    (응답이 끊겨 앱 수신함으로 다시 들어와도 중복 없음). 한쪽을 바꾸면 다른 쪽도 — `baby-log/tests` 가 둘을 비교한다.
+  - 같은 사람의 두 번째 기기(홈 화면 앱·태블릿)는 초대 링크로 그 사람을 고를 수 없다 (이미 기기가 있는 자리는 서버가 막음).
+    원래 기기의 **설정 → 내 다른 기기 연결**(1회용·15분 `#dev=` 링크)로 잇는다. 폰을 잃어버리면 관리자가
+    **설정 → 가족 멤버 → 기기 연결 해제(폰 분실 시)** → 그 자리를 초대 링크로 다시 고를 수 있게 된다.

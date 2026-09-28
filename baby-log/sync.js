@@ -537,6 +537,9 @@ export async function createDeviceLink(state) {
   return { code: res.code, expiresAt: Number(res.expiresAt) || null, link: deviceLink(res.code) };
 }
 
+/** createDeviceLink 의 다른 이름 (설계 메모의 이름) */
+export const requestDeviceLink = (state) => createDeviceLink(state);
+
 /**
  * 이 기기 공유 끊기 — 남은 기록을 먼저 한 번 보내 보고(실패해도 계속), 서버에서 이 기기만 끊은 뒤 로컬 연결 정보를 지운다.
  * 기록은 이 기기에 그대로 남는다 (이후 '이 기기만' 모드).
@@ -681,10 +684,15 @@ export async function clearSwData() {
   try { return await caches.delete(SW_DATA_CACHE); } catch (e) { return false; }
 }
 
-// 'both' 의 대변 쪽 id — 소변 id 에서 결정적으로 만든다 (다시 가져와도 중복되지 않게): 마지막 12자리 16진수를 보수(15-d)로
-function pairId(id) {
+/**
+ * 'both' 의 대변 쪽 id — 소변 id 에서 결정적으로 만든다 (다시 가져와도 중복되지 않게): 마지막 12자리 16진수를 보수(15-d)로.
+ * ⚠ 서버 supabase/functions/uriday-log/handler.js 의 pairId 와 같은 계산 (알림 버튼 요청의 응답이 끊겨 수신함으로도
+ *   들어오면 서버와 앱이 같은 대변 id 를 만들어야 중복이 안 생긴다 — tests/store-sync.test.mjs 에서 둘을 비교).
+ */
+export function pairId(id) {
   if (!isUuid(id)) return uuid();
-  return id.slice(0, 24) + Array.from(id.slice(24), (ch) => (15 - parseInt(ch, 16)).toString(16)).join('');
+  const u = id.trim().toLowerCase();
+  return u.slice(0, 24) + Array.from(u.slice(24), (ch) => (15 - parseInt(ch, 16)).toString(16)).join('');
 }
 
 function importInboxEvent(state, raw, now) {

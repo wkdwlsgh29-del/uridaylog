@@ -379,6 +379,14 @@ function pickCode(body) {
   if (devRaw != null && devRaw !== '') return { kind: 'device', code: normCode(devRaw, 'dev') };
   return { kind: 'invite', code: normCode(body.invite, 'join') };
 }
+// 'both'(소변+대변) 의 대변 쪽 id — 소변 id 에서 결정적으로 만든다: 마지막 12자리 16진수를 보수(15-d)로.
+// ⚠ 앱 baby-log/sync.js 의 pairId 와 반드시 같은 계산이어야 한다 (알림 버튼이 보낸 요청의 응답이 끊겨
+//   앱 수신함으로도 같은 id 가 들어오면, 두 쪽이 같은 대변 id 를 만들어야 중복이 생기지 않는다).
+export function pairId(id) {
+  const u = uuidOf(id);
+  if (!u) return crypto.randomUUID();
+  return u.slice(0, 24) + Array.from(u.slice(24), (ch) => (15 - parseInt(ch, 16)).toString(16)).join('');
+}
 function tokenOf(v) {
   const k = typeof v === 'string' ? v.trim() : '';
   return /^[A-Za-z0-9_-]{43}$/.test(k) ? k : null;
@@ -1156,7 +1164,8 @@ export function createHandler({ sql, now = () => Date.now(), salt = '' }) {
 
       if (plan.kind === 'both') {
         await insert('pee', {}, reqId || undefined);
-        const pd = await insert('poop', plan.data || {});
+        // 대변 id 는 소변 id 에서 결정적으로 (앱 수신함과 같은 계산) → 응답이 끊겨 다시 들어와도 중복 없음
+        const pd = await insert('poop', plan.data || {}, reqId ? pairId(reqId) : undefined);
         const warn = await poopWarn(t, fid, pd, at);
         return text(`${line1(`소변·${describe('poop', pd)} 기록`)}\n${await countLine(t, fid, ['pee', 'poop'], at, nowMs)}${warn}`);
       }
