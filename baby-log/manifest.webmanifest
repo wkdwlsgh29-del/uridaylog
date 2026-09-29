@@ -1,0 +1,23 @@
+{
+  "name": "함께 육아일지 | uridaylog",
+  "short_name": "육아일지",
+  "description": "엄마·아빠·시터가 같이 쓰는 육아일지. 가입 없이 탭 한 번으로 기록하고 교대 요약을 보내요.",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FBF6F0",
+  "theme_color": "#FBF6F0",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "소변 기록", "short_name": "소변", "url": "./?q=pee", "icons": [{ "src": "icons/sc-pee.png", "sizes": "96x96", "type": "image/png" }] },
+    { "name": "대변 기록", "short_name": "대변", "url": "./?q=poop", "icons": [{ "src": "icons/sc-poop.png", "sizes": "96x96", "type": "image/png" }] },
+    { "name": "분유 기록", "short_name": "분유", "url": "./?q=formula", "icons": [{ "src": "icons/sc-formula.png", "sizes": "96x96", "type": "image/png" }] },
+    { "name": "재우기 · 깼어요", "short_name": "재우기·깼어요", "url": "./?q=sleep", "icons": [{ "src": "icons/sc-sleep.png", "sizes": "96x96", "type": "image/png" }] }
+  ]
+}
