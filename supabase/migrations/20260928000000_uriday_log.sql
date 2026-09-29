@@ -55,6 +55,11 @@ create table if not exists uriday.devices (
   foreign key (family_id, member_id) references uriday.members(family_id, id) on delete cascade
 );
 create index if not exists devices_member_idx on uriday.devices (family_id, member_id);
+-- 기록 전용 키(잠금화면 단축어 주소에 넣는 키) — quick 기록만 되고 동기화·관리 동작은 안 된다. sha256 만 저장.
+alter table uriday.devices add column if not exists quick_hash text unique check (quick_hash ~ '^[0-9a-f]{64}$');
+-- 참여 요청 nonce 의 sha256 — 응답이 끊겨 같은 참여를 다시 보내면 그때 만든 기기를 이어 준다 (자리 중복·403 방지)
+alter table uriday.devices add column if not exists join_hash text check (join_hash ~ '^[0-9a-f]{64}$');
+create index if not exists devices_join_idx on uriday.devices (family_id, join_hash) where join_hash is not null;
 
 -- ── 기록 ─────────────────────────────────────────────────────────────────
 create sequence if not exists uriday.rev_seq as bigint;

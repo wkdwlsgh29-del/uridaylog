@@ -42,10 +42,12 @@
   <div class="shell">
 
     <!-- 인앱 브라우저(카톡·인스타) 안내 -->
+    <!-- 처음 한 번은 크게, 다음부터(또는 ✕)는 한 줄로 — 새벽에 퀵 그리드가 첫 화면 밖으로 밀리지 않게 -->
     <div class="banner banner-gold hidden" id="inappBanner">
-      <div>📱 <b>카카오톡·인스타 안에서 열렸어요.</b> 여기서 쓰면 기록이 따로 저장돼요 —
-        오른쪽 위 <b>⋯ 메뉴 → 다른 브라우저로 열기</b>(사파리/크롬)로 열어야 기록이 안전하게 남아요.</div>
+      <div><span class="banner-full">📱 <b>카카오톡·인스타 안에서 열렸어요.</b> 여기서 쓰면 기록이 따로 저장돼요 —
+        오른쪽 위 <b>⋯ 메뉴 → 다른 브라우저로 열기</b>(사파리/크롬)로 열어야 기록이 안전하게 남아요.</span><span class="banner-short">📱 카톡 안 · <b>⋯ → 다른 브라우저로</b></span></div>
       <button class="banner-btn" id="inappCopy">링크 복사</button>
+      <button class="banner-x" id="inappX" aria-label="안내를 한 줄로 줄이기">✕</button>
     </div>
 
     <!-- 가족 연결이 끊긴 기기 -->
@@ -99,7 +101,7 @@
       <header class="top top-main">
         <span class="brand-mark"><span class="logo">📒</span><span class="brand-text">육아일지</span></span>
         <div class="top-right">
-          <button class="sync-pill" id="syncPill" aria-label="공유 상태"><i class="dot" id="syncDot"></i><span id="syncText">이 기기만</span></button>
+          <button class="sync-pill" id="syncPill" aria-label="공유 상태: 이 기기만"><i class="dot" id="syncDot" aria-hidden="true"></i><span id="syncText">이 기기만</span></button>
           <button class="me-chip" id="meChip" aria-label="지금 기록하는 사람 바꾸기"></button>
         </div>
       </header>
@@ -123,8 +125,8 @@
         <div class="tl-head">
           <h2>기록</h2>
           <div class="tabs" id="tlTabs" role="tablist">
-            <button class="tab active" data-tab="today" role="tab">오늘</button>
-            <button class="tab" data-tab="yesterday" role="tab">어제</button>
+            <button class="tab active" data-tab="today" role="tab" aria-selected="true">오늘</button>
+            <button class="tab" data-tab="yesterday" role="tab" aria-selected="false">어제</button>
           </div>
         </div>
         <div id="timeline"></div>
@@ -163,7 +165,7 @@
 
   <!-- 가운데 모달 (확인·레벨업·도감) -->
   <div class="modal-dim hidden" id="modalDim">
-    <div class="modal" id="modal" role="alertdialog" aria-modal="true"></div>
+    <div class="modal" id="modal" role="alertdialog" aria-modal="true" aria-labelledby="modalTitle"></div>
   </div>
 
   <!-- 되돌리기 토스트 -->

@@ -10,13 +10,16 @@
 //   · 동기화 도중 사용자가 기록을 고쳐도 LWW 로 로컬이 이긴다 (updatedAt 은 store.bump 로 단조 증가).
 //
 // 서비스워커(sw.js) 연결 — Cache Storage `SW_DATA_CACHE`('uriday-bl-data')
-//   · ./__bl/config  : writeSwConfig 가 쓰는 JSON { v, endpoint, token, meId, meName, meEmoji, quickActions, lastMl, babyName }
+//   · ./__bl/config  : writeSwConfig 가 쓰는 JSON { v, endpoint, token, meId, selfId, meName, meEmoji, quickActions, lastMl, babyName }
+//       selfId = 이 기기 주인 — 수신함 기록의 '누가' (온라인이면 서버가 토큰의 사람으로 기록하므로 오프라인도 같게)
+//       lastMl = 분유·유축 양: 이 기기가 마지막에 고른 양, 없으면 가족의 마지막 기록 양 (그리드·잠금화면 주소와 같은 규칙)
 //   · ./__bl/inbox/<id> : 서비스워커가 (오프라인·서버 없음으로) 바로 못 보낸 알림 버튼 기록을 한 건씩 넣는 곳.
 //       본문 = 기록 JSON { id(uuid), type, ts, by?, data? }. 'both' 는 두 건(pee, poop)으로 넣는다.
 //       drainInbox 가 가져와 저장한 뒤에만 지운다 (한 건씩 키가 달라서 읽기-쓰기 경합이 없다).
 //       서버로 바로 보내는 데 성공했으면 수신함에 넣지 않는다 (중복 방지).
 //     (SPEC 의 단일 배열 ./__bl/inbox 도 읽어서 가져온다 — 호환용)
-//   · 알림 버튼 → 서비스워커는 먼저 id(uuid)를 만들고 quick 주소에 `&src=notif&id=<uuid>&ts=<ms>` 를 붙여 POST.
+//   · 알림 버튼 → 서비스워커는 먼저 id(uuid)를 만들고 quick 주소에 `&src=notif&id=<uuid>&ts=<ms>` 를 붙여 POST
+//     (기기 토큰은 주소가 아니라 본문 k= 로 — 요청 주소는 서버·프록시 기록에 남을 수 있어서).
 //     실패하면 같은 id 로 수신함에 넣는다 → 사실은 서버에 들어갔더라도 서버가 id 로 중복을 막는다.
 //   ⚠ sw.js 의 activate 에서 옛 캐시를 지울 때 SW_DATA_CACHE 는 남겨 둘 것.
 //
@@ -25,9 +28,9 @@
 // ============================================================
 
 import { BRAND } from '../shared/js/brand.js';
-import { uuid, isUuid, cleanData } from './logic.js';
-import { EVENT_TYPES, ROLE_BY_ID } from './log-data.js';
-import { save, dirtyMembers, familyDirty, defaultSync, bump } from './store.js';
+import { uuid, isUuid, cleanData, lastMl } from './logic.js';
+import { EVENT_TYPES, ROLE_BY_ID, AMOUNT_TYPES } from './log-data.js';
+import { save, dirtyMembers, familyDirty, defaultSync, bump, ownerId } from './store.js';
 
 /** 서비스워커와 공유하는 데이터 캐시 이름 (sw.js 가 지우지 않게 이 이름을 import 해서 제외) */
 export const SW_DATA_CACHE = 'uriday-bl-data';
@@ -48,6 +51,8 @@ const KEEPALIVE_MAX_BYTES = 50000;   // fetch keepalive 본문 한도(64KB) 안�
 const MAX_ROUNDS = 40;           // 한 번의 syncNow 안에서 push/pull 반복 상한
 const BACKOFF_BASE = 5000;
 const BACKOFF_MAX = 5 * 60000;
+/** 서버는 updatedAt 을 '서버 시각 + 이만큼'까지로 자른다 (handler.js FUTURE_MS 와 같게) — 잘린 서버본을 받아들일 때 씀 */
+export const UPDATED_AT_FUTURE_MS = 10 * 60000;
 
 /** 오류 코드별 한국어 안내 (서버 message 가 없을 때) */
 export const ERROR_COPY = {
@@ -201,10 +206,13 @@ function takeChunk(list, maxBytes = PUSH_MAX_BYTES) {
  * 서버 기록 병합 (LWW by updatedAt) → { changed, added, updated, confirmed }
  * · 로컬에 없으면 추가 · 로컬이 dirty 이고 더 새로우면 로컬 유지(rev 만 갱신)
  * · 서버 updatedAt ≥ 로컬 → 서버 것으로 바꾸고 dirty 해제 (보낸 기록의 '확인')
+ * serverTime(응답의 서버 시각)을 주면 로컬 updatedAt 을 서버처럼 serverTime + UPDATED_AT_FUTURE_MS 로 잘라서 비교한다
+ *   — 시계가 크게 빠른 기기가 보낸 값을 서버가 잘랐을 때 그 서버본을 받아들이게 (안 그러면 끝없이 다시 보냄).
  */
-export function mergeServer(state, serverEvents) {
+export function mergeServer(state, serverEvents, serverTime = null) {
   const res = { changed: false, added: 0, updated: 0, confirmed: 0 };
   if (!Array.isArray(serverEvents) || !serverEvents.length) return res;
+  const cap = futureCap(serverTime);
   const idx = new Map(state.events.map((e, i) => [e.id, i]));
   for (const raw of serverEvents) {
     const s = fromServerEvent(raw);
@@ -217,7 +225,7 @@ export function mergeServer(state, serverEvents) {
       continue;
     }
     const l = state.events[i];
-    if (l.updatedAt > s.updatedAt) {
+    if (Math.min(l.updatedAt, cap) > s.updatedAt) {
       // 로컬이 더 새로움 — 유지. (dirty 가 아닌데 더 새로우면 서버에 없는 변경이므로 다시 보내도록 dirty)
       if (s.rev > (l.rev || 0)) l.rev = s.rev;
       if (!l.dirty) l.dirty = true;
@@ -234,13 +242,19 @@ export function mergeServer(state, serverEvents) {
   return res;
 }
 
+function futureCap(serverTime) {
+  const t = Number(serverTime);
+  return serverTime != null && Number.isFinite(t) ? t + UPDATED_AT_FUTURE_MS : Infinity;
+}
+
 /**
  * 서버의 구성원·가족·나 정보 반영 → 바뀐 게 있으면 true
  * 구성원 프로필은 LWW(로컬 dirty 가 더 새로우면 유지), isAdmin/claimed/revoked 는 항상 서버 값.
  * meId 는 비었거나 없는 구성원일 때만 서버의 me 로 (이 기기에서 '나'를 바꿔 쓰는 경우를 존중).
  */
-export function applyServerMeta(state, { members, family, me, familyId } = {}) {
+export function applyServerMeta(state, { members, family, me, familyId, serverTime } = {}) {
   let changed = false;
+  const cap = futureCap(serverTime);
   if (Array.isArray(members)) {
     for (const sm of members) {
       if (!isObj(sm) || typeof sm.id !== 'string') continue;
@@ -251,7 +265,7 @@ export function applyServerMeta(state, { members, family, me, familyId } = {}) {
         state.members.push(l);
         changed = true;
       }
-      if (!(l.dirty && l.updatedAt > upd)) {
+      if (!(l.dirty && Math.min(l.updatedAt, cap) > upd)) {
         const role = ROLE_BY_ID[sm.role] ? sm.role : 'other';
         const next = {
           name: typeof sm.name === 'string' && sm.name ? sm.name : ROLE_BY_ID[role].label,
@@ -269,7 +283,7 @@ export function applyServerMeta(state, { members, family, me, familyId } = {}) {
   if (isObj(family)) {
     const f = state.family;
     const upd = isNum(Number(family.updatedAt)) ? Number(family.updatedAt) : 0;
-    if (!(f.dirty && f.updatedAt > upd)) {
+    if (!(f.dirty && Math.min(f.updatedAt, cap) > upd)) {
       const name = typeof family.name === 'string' ? family.name : f.name;
       const birth = typeof family.birth === 'string' && /^\d{4}-\d{2}-\d{2}/.test(family.birth) ? family.birth.slice(0, 10) : f.birth;
       if (name !== f.name || birth !== f.birth) changed = true;
@@ -280,6 +294,7 @@ export function applyServerMeta(state, { members, family, me, familyId } = {}) {
   if (typeof familyId === 'string' && familyId && state.family.id !== familyId) { state.family.id = familyId; changed = true; }
   if (isObj(me) && typeof me.memberId === 'string') {
     if (state.sync.memberId !== me.memberId) { state.sync.memberId = me.memberId; changed = true; }
+    if (state.sync.token) state.selfId = me.memberId;   // 이 기기 주인 = 서버가 토큰에 묶은 사람
     if ('isAdmin' in me && state.sync.isAdmin !== !!me.isAdmin) { state.sync.isAdmin = !!me.isAdmin; changed = true; }
     if (!state.meId || !state.members.some((m) => m.id === state.meId)) { state.meId = me.memberId; changed = true; }
   }
@@ -303,6 +318,9 @@ function adoptSession(state, res, fallbackMemberId) {
     revoked: false,
   };
   if (state.sync.familyId) state.family.id = state.sync.familyId;
+  // 이 기기 주인 — 공유를 끊어도 남겨서, 나중에 다시 참여할 때 '내 기록'이 누구인지·같은 가족인지 안다
+  if (state.sync.memberId) state.selfId = state.sync.memberId;
+  if (state.sync.familyId) state.selfFamilyId = state.sync.familyId;
 }
 
 async function afterJoin(state, now) {
@@ -318,17 +336,20 @@ async function afterJoin(state, now) {
  */
 export async function createFamily(state, now = Date.now()) {
   assertNotShared(state);
-  if (!state.meId || !state.members.some((m) => m.id === state.meId)) throw new ApiError(0, 'bad_request', '먼저 "나는 누구"를 골라 주세요');
+  // 이 기기(와 관리자 자리)는 기기 주인으로 — '나 · 이름'을 잠깐 할머니로 바꿔 둔 채 켜도 할머니가 되지 않게
+  const owner = ownerId(state);
+  const creator = owner && state.members.some((m) => m.id === owner) ? owner : state.meId;
+  if (!creator || !state.members.some((m) => m.id === creator)) throw new ApiError(0, 'bad_request', '먼저 "나는 누구"를 골라 주세요');
   const alive = state.events.filter((e) => !e.deleted);
   const first = takeChunk(alive);
   const res = await api('create', {
     family: toWireFamily(state.family),
     members: state.members.map(toWireMember),
-    meId: state.meId,
+    meId: creator,
     events: first.map(toWireEvent),
   });
   if (typeof res.token !== 'string' || !res.token) throw new ApiError(0, 'bad_response');
-  adoptSession(state, res, state.meId);
+  adoptSession(state, res, creator);
   // 새 가족에게 옛 툼스톤은 의미 없음. 살아 있는 기록은 dirty 로 두고 syncNow 의 pull 로 확인한다.
   for (const e of state.events) {
     if (e.deleted) e.dirty = false;
@@ -366,57 +387,79 @@ export async function peekInvite(code) {
   return { kind, family: res.family || {}, members, member: isObj(res.member) ? res.member : null };
 }
 
+/** 참여 시트 하나당 한 번 만드는 비밀 값 — 응답이 끊겨 다시 누르면 서버가 같은 참여로 알아보고 이어 준다 */
+export function makeJoinNonce() {
+  const b = new Uint8Array(24);
+  const c = globalThis.crypto;
+  if (c && typeof c.getRandomValues === 'function') c.getRandomValues(b);
+  else for (let i = 0; i < b.length; i++) b[i] = Math.floor(Math.random() * 256);
+  let bin = '';
+  for (const x of b) bin += String.fromCharCode(x);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
 /**
  * 초대로 가족 참여 → 서버 응답. code = 초대 링크·코드, 또는 기기 연결 링크(#dev=, 그 사람으로 연결 — claim/me 무시).
  * 이미 기기가 있는 사람을 claim 하면 서버가 403(forbidden) — "그 사람 기기에서 '내 다른 기기 연결' 코드를 받아 주세요".
- * opts: { claim?: 기존 구성원 id("저는 이 사람이에요"), me?: {name, role, emoji} (새로 참여), merge?: 이 기기 기록을 합칠지 }
- * merge=true: 이 기기의 기록을 새 가족으로 올린다 — 내 기록(by=옛 meId)은 참여한 구성원으로 바꾸고,
- *   다른 사람 자리표시 구성원은 그 사람 기록이 있을 때만 함께 올린다. merge=false: 이 기기 기록을 버리고 가족 기록만 받는다.
+ * opts: { claim?: 기존 구성원 id("저는 이 사람이에요"), me?: {id?, name, role, emoji} (새로 참여), merge?: 이 기기 기록을 합칠지,
+ *         nonce?: makeJoinNonce() — 다시 시도할 때 같은 값과 같은 me.id 를 보내면 자리가 둘로 늘지 않는다 }
+ * '내 기록' = 이 기기 주인(ownerId)의 기록. '나 · 이름' 전환(meId)으로 다른 사람을 골라 둔 것과는 상관없다.
+ * · 다른 가족(또는 처음 공유): merge=true 면 이 기기 기록을 새 가족으로 올린다 — 내 기록은 참여한 구성원으로 바꾸고,
+ *   다른 사람 자리표시 구성원은 그 사람 기록이 있을 때만 함께 올린다. merge=false 면 이 기기 기록을 버리고 가족 기록만 받는다.
+ * · 같은 가족에 다시 참여(연결이 끊겼거나 공유를 끊었던 기기): 서버에 이미 있는 기록은 절대 고치지 않는다 (다른 사람이
+ *   이어받은 폰이어도 옛 주인의 기록이 새 사람 것으로 바뀌지 않게). 아직 못 보낸 이 기기 기록은 그대로 올라가고,
+ *   merge=true 이고 다른 사람으로 참여했을 때만 그중 내 기록을 새 나로 바꾼다.
  * 이미 다른 가족과 공유 중이면 ApiError('already_shared') — 먼저 leaveFamily.
  */
-export async function joinFamily(state, code, { claim = null, me = null, merge = false } = {}, now = Date.now()) {
+export async function joinFamily(state, code, { claim = null, me = null, merge = false, nonce = null } = {}, now = Date.now()) {
   assertNotShared(state);
-  const oldMeId = state.meId;
-  const prevFamilyId = state.sync?.familyId || null;
+  const oldSelf = ownerId(state);
+  const prevFamilyId = state.sync?.familyId || state.selfFamilyId || null;
   const body = {};
+  const extra = typeof nonce === 'string' && nonce ? { nonce } : {};
   if (claim) body.claim = claim;
   else {
     const m = me || {};
     const role = ROLE_BY_ID[m.role] ? m.role : 'other';
-    // 연결이 끊긴 기기(내보내진 사람일 수 있음)는 옛 구성원 id 를 다시 쓰지 않는다 — 서버가 403(빠진 사람)으로 막음.
-    // 새 id 로 참여하고, merge 면 아래에서 내 옛 기록(by=옛 id)을 새 구성원으로 옮긴다.
-    const reuse = merge && isUuid(oldMeId) && !state.sync?.revoked ? oldMeId : null;
+    // 옛 '나' id 는 다시 쓰지 않는다 — 같은 가족이면 서버가 그 빈 자리를 조용히 차지해 버린다 (폰을 이어받은 다른 사람일 수 있음).
+    // 다른 가족에 합칠 때는 아래에서 내 기록을 새 id 로 옮긴다.
     body.me = {
-      id: reuse || (isUuid(m.id) ? m.id : uuid()),
+      id: isUuid(m.id) ? m.id : uuid(),
       name: (typeof m.name === 'string' && m.name.trim()) || ROLE_BY_ID[role].label,
       role,
       emoji: (typeof m.emoji === 'string' && m.emoji) || ROLE_BY_ID[role].emoji,
     };
   }
   // 기기 연결 코드면 claim/me 없이 그 사람으로 연결된다
-  const { res } = await withJoinCode(code, (b) => api('join', b.device ? b : { ...b, ...body }));
+  const { res } = await withJoinCode(code, (b) => api('join', b.device ? { ...b, ...extra } : { ...b, ...body, ...extra }));
   if (typeof res.token !== 'string' || !res.token) throw new ApiError(0, 'bad_response');
   const newMe = res.me?.memberId || body.me?.id || claim;
-  const sameFamily = prevFamilyId && (res.familyId === prevFamilyId || res.family?.id === prevFamilyId);
+  const newFamilyId = res.familyId || res.family?.id || null;
+  const sameFamily = !!prevFamilyId && newFamilyId === prevFamilyId;
+  const moveMine = oldSelf && newMe && oldSelf !== newMe;
 
-  if (merge || sameFamily) {
+  if (sameFamily) {
+    if (merge && moveMine) {
+      for (const e of state.events) {
+        // 서버가 한 번도 확인하지 않은(이 기기에서 새로 만든) 내 기록만
+        if (e.by === oldSelf && e.dirty && !(e.rev > 0)) {
+          e.by = newMe;
+          e.updatedAt = bump(e.updatedAt, now);
+        }
+      }
+    }
+  } else if (merge) {
     for (const e of state.events) {
-      if (oldMeId && e.by === oldMeId && newMe && oldMeId !== newMe) {
+      if (moveMine && e.by === oldSelf) {
         e.by = newMe;
         e.updatedAt = bump(e.updatedAt, now);
-        e.dirty = true;
       }
-      if (!sameFamily) {
-        if (e.deleted) e.dirty = false;
-        else { e.dirty = true; e.rev = 0; }
-      }
+      if (e.deleted) e.dirty = false;
+      else { e.dirty = true; e.rev = 0; }
     }
     const usedBy = new Set(state.events.filter((e) => !e.deleted).map((e) => e.by));
-    state.members = state.members.filter((m) => m.id !== oldMeId || m.id === newMe);
-    if (!sameFamily) {
-      state.members = state.members.filter((m) => usedBy.has(m.id) || m.id === newMe);
-      for (const m of state.members) m.dirty = m.id !== newMe;
-    }
+    state.members = state.members.filter((m) => (!moveMine || m.id !== oldSelf) && (usedBy.has(m.id) || m.id === newMe));
+    for (const m of state.members) m.dirty = m.id !== newMe;
   } else {
     state.events = [];
     state.members = [];
@@ -458,7 +501,7 @@ export async function syncNow(state, now = Date.now(), opts = {}) {
     }
     if (state.sync?.token !== token) return { changed };   // 도중에 공유를 끊음/다른 가족 참여 — 결과 버림
     const events = Array.isArray(res.events) ? res.events : [];
-    const m = mergeServer(state, events);
+    const m = mergeServer(state, events, res.serverTime);
     changed = m.changed || changed;
     if (Array.isArray(res.rejected)) {
       const ids = new Set(res.rejected.map(String));
@@ -503,11 +546,15 @@ export async function rotateInvite(state) {
   return state.sync.invite;
 }
 
-/** 구성원 내보내기 (관리자, 나 자신은 안 됨) — 그 사람의 기기 연결도 끊긴다 */
+/**
+ * 구성원 내보내기 (관리자, 나 자신은 안 됨) — 그 사람의 기기 연결도 끊긴다.
+ * 서버가 초대 코드도 새로 바꿔 준다 (내보낸 사람이 옛 링크로 '새 사람'이 되어 다시 들어오지 못하게) → sync.invite 갱신.
+ */
 export async function removeMember(state, memberId) {
   const res = await authed(state, 'remove', { memberId });
   const m = state.members.find((x) => x.id === memberId);
   if (m) m.revoked = true;
+  if (typeof res.invite === 'string' && res.invite) state.sync.invite = res.invite;
   if (Array.isArray(res.members)) applyServerMeta(state, res);
   return res;
 }
@@ -521,7 +568,10 @@ export async function setAdmin(state, memberId, on) {
   return res;
 }
 
-/** 구성원의 기기 연결만 모두 끊기 (관리자; 내보내지 않음 — 폰을 잃어버렸을 때. 그 자리는 다시 차지할 수 있음) */
+/**
+ * 구성원의 기기 연결만 모두 끊기 (관리자; 내보내지 않음 — 폰을 잃어버렸을 때. 그 자리는 다시 차지할 수 있음).
+ * 그 사람이 관리자였다면 관리자 권한도 해제된다 (다시 연결하면 다시 지정).
+ */
 export async function unlinkMember(state, memberId) {
   const res = await authed(state, 'unlink', { memberId });
   if (Array.isArray(res.members)) applyServerMeta(state, res);
@@ -539,6 +589,27 @@ export async function createDeviceLink(state) {
 
 /** createDeviceLink 의 다른 이름 (설계 메모의 이름) */
 export const requestDeviceLink = (state) => createDeviceLink(state);
+
+/** 내 다른 기기 연결 모두 끊기 (이 기기만 남김) — 연결 링크·토큰이 샜을 때 스스로 정리 */
+export async function signOutOtherDevices(state) {
+  const res = await authed(state, 'signout');
+  if (Array.isArray(res.members)) applyServerMeta(state, res);
+  return res;
+}
+
+/**
+ * 잠금화면 단축어 주소용 기록 전용 키 (없으면 서버에서 받아 sync.quickKey 에 저장) → 키.
+ * rotate=true 면 새로 만든다 (옛 주소로 만든 단축어는 바로 멈춤 — 주소가 샜을 때).
+ * 이 키로는 기록 한 건만 할 수 있다 (가족 기록 읽기·초대·기기 연결 불가).
+ */
+export async function ensureQuickKey(state, { rotate = false } = {}) {
+  if (!rotate && state.sync?.quickKey && state.sync.token && !state.sync.revoked) return state.sync.quickKey;
+  const token = state.sync?.token;
+  const res = await authed(state, 'quickkey');
+  if (typeof res.quick !== 'string' || !res.quick) throw new ApiError(0, 'bad_response');
+  if (state.sync?.token === token) state.sync.quickKey = res.quick;
+  return res.quick;
+}
 
 /**
  * 이 기기 공유 끊기 — 남은 기록을 먼저 한 번 보내 보고(실패해도 계속), 서버에서 이 기기만 끊은 뒤 로컬 연결 정보를 지운다.
@@ -622,13 +693,14 @@ export function parseInvite(text) {
 }
 
 /**
- * 잠금화면 단축어용 개인 주소 `${endpoint}?a=q&k=TOKEN&t=TYPE[&ml=..]` — 공유 중이 아니면 ''.
- * ⚠ 이 주소는 비밀번호와 같다 (토큰 포함).
+ * 잠금화면 단축어용 개인 주소 `${endpoint}?a=q&k=QUICKKEY&t=TYPE[&ml=..]` — 공유 중이 아니거나 기록 전용 키가 아직 없으면 ''
+ * (먼저 ensureQuickKey). 기기 토큰은 절대 넣지 않는다 — 주소가 새도 기록만 되고 가족 기록은 못 읽는다.
+ * ⚠ 그래도 남에게 보내면 안 된다 (내 이름으로 기록됨). 샜으면 ensureQuickKey(state, { rotate: true }).
  */
 export function quickUrl(state, type, params = {}) {
   const ep = endpoint();
-  const k = state?.sync?.token;
-  if (!ep || !k || state.sync.revoked) return '';
+  const k = state?.sync?.quickKey;
+  if (!ep || !k || !state.sync.token || state.sync.revoked) return '';
   let u;
   try { u = new URL(ep); } catch (e) { return ''; }
   u.searchParams.set('a', 'q');
@@ -651,15 +723,22 @@ function swUrl(path) {
 export function swConfig(state) {
   const token = state?.sync?.token && !state.sync.revoked ? state.sync.token : null;
   const meM = state?.members?.find((m) => m.id === state.meId) || null;
+  // 분유·유축 양: 이 기기가 고른 양 → 없으면 가족의 마지막 기록 양 (다른 가족이 160 을 기록했는데 알림 버튼만 100 이 되지 않게)
+  const lastMlCfg = {};
+  for (const t of AMOUNT_TYPES) {
+    const v = state?.prefs?.lastMl?.[t] ?? (Array.isArray(state?.events) ? lastMl(state.events, t) : null);
+    if (isNum(v)) lastMlCfg[t] = v;
+  }
   return {
     v: 1,
     endpoint: token ? endpoint() : '',
     token,
     meId: state?.meId ?? null,
+    selfId: ownerId(state),
     meName: meM?.name || '',
     meEmoji: meM?.emoji || '',
     quickActions: Array.isArray(state?.prefs?.quickActions) ? state.prefs.quickActions.slice(0, 2) : ['pee', 'poop'],
-    lastMl: { ...(state?.prefs?.lastMl || {}) },
+    lastMl: lastMlCfg,
     babyName: state?.family?.name || '',
   };
 }
@@ -710,7 +789,7 @@ function importInboxEvent(state, raw, now) {
   const data = cleanData(type, { src: 'notif', ...(isObj(raw.data) ? raw.data : {}) }, ts);
   state.events.push({
     id, type, ts,
-    by: typeof raw.by === 'string' && raw.by ? raw.by : (state.meId ?? null),
+    by: typeof raw.by === 'string' && raw.by ? raw.by : (ownerId(state) ?? null),
     data, deleted: false, updatedAt: isNum(raw.updatedAt) ? raw.updatedAt : ts, rev: 0, dirty: true,
   });
   return 1;

@@ -37,6 +37,10 @@ export function defaultState() {
     family: { id: null, name: '', birth: '', updatedAt: 0, dirty: false },
     members: [],
     meId: null,
+    // 이 기기 주인(구성원 id)과 그 사람이 속한(또는 마지막으로 속했던) 가족 id — 공유를 끊어도 남는다.
+    // meId 는 '나 · 이름' 전환(다른 사람 이름으로 대신 기록)이라 기기 주인과 다를 수 있다 → ownerId() 로 읽는다.
+    selfId: null,
+    selfFamilyId: null,
     events: [],
     sync: defaultSync(),
     prefs: {
@@ -46,9 +50,12 @@ export function defaultState() {
   };
 }
 
-/** 공유 안 한 상태의 sync 블록 (memberId = 서버가 이 기기 토큰에 묶은 구성원, revoked = 401로 끊김) */
+/**
+ * 공유 안 한 상태의 sync 블록 (memberId = 서버가 이 기기 토큰에 묶은 구성원, revoked = 401로 끊김,
+ * quickKey = 잠금화면 단축어 주소에 넣는 기록 전용 키 — 기기 토큰과 달리 기록 한 건만 할 수 있다)
+ */
 export function defaultSync() {
-  return { token: null, familyId: null, rev: 0, isAdmin: false, lastSyncAt: 0, invite: null, memberId: null, revoked: false };
+  return { token: null, familyId: null, rev: 0, isAdmin: false, lastSyncAt: 0, invite: null, memberId: null, revoked: false, quickKey: null };
 }
 
 // ---------- 불러오기 · 검증 ----------
@@ -119,6 +126,8 @@ export function normalizeState(obj) {
   s.events = [...byId.values()];
   // 나
   s.meId = typeof obj.meId === 'string' && s.members.some((m) => m.id === obj.meId) ? obj.meId : (s.members[0]?.id ?? null);
+  s.selfId = typeof obj.selfId === 'string' && obj.selfId ? obj.selfId : null;
+  s.selfFamilyId = typeof obj.selfFamilyId === 'string' && obj.selfFamilyId ? obj.selfFamilyId : null;
   // 동기화
   const y = isObj(obj.sync) ? obj.sync : {};
   s.sync = {
@@ -131,7 +140,11 @@ export function normalizeState(obj) {
     invite: typeof y.invite === 'string' && y.invite ? y.invite : null,
     memberId: typeof y.memberId === 'string' && y.memberId ? y.memberId : null,
     revoked: !!y.revoked,
+    quickKey: typeof y.quickKey === 'string' && y.quickKey ? y.quickKey : null,
   };
+  // 옛 저장값(selfId 없음): 공유 중이었으면 그 기기의 구성원, 아니면 그때의 '나'
+  if (!s.selfId) s.selfId = s.sync.memberId || s.meId || null;
+  if (!s.selfFamilyId && s.sync.familyId) s.selfFamilyId = s.sync.familyId;
   if (isNum(y.skewMs)) s.sync.skewMs = y.skewMs;
   // 설정
   const p = isObj(obj.prefs) ? obj.prefs : {};
@@ -214,11 +227,12 @@ function cleanMemberName(name, role) {
   return n || (ROLE_BY_ID[role] || ROLE_BY_ID.other).label;
 }
 
-/** 첫 실행: 아기 정보 + 나(구성원) 만들기 → 만든 구성원. meId 가 그 구성원이 된다 */
+/** 첫 실행: 아기 정보 + 나(구성원) 만들기 → 만든 구성원. meId 와 이 기기 주인(selfId)이 그 구성원이 된다 */
 export function setupFamily(state, { name = '', birth = '', me = {} } = {}, now = Date.now()) {
   updateFamily(state, { name, birth }, now);
   const m = upsertMember(state, { role: me.role, name: me.name, emoji: me.emoji }, now);
   state.meId = m.id;
+  state.selfId = m.id;
   return m;
 }
 
@@ -254,6 +268,17 @@ export function upsertMember(state, member = {}, now = Date.now()) {
   };
   state.members.push(m);
   return m;
+}
+
+/**
+ * 이 기기 주인(구성원 id) — '나 · 이름' 전환과 무관.
+ * 공유 중(또는 연결이 끊긴 채)이면 서버가 이 기기 토큰에 묶은 사람, 아니면 처음 시작·참여한 사람(selfId).
+ * 가족 참여 때 '내 기록'을 옮기거나, 알림 버튼 기록의 '누가'를 정할 때 쓴다 (meId 로 하면 다른 사람 기록을 옮기게 됨).
+ */
+export function ownerId(state) {
+  if (!state) return null;
+  if (state.sync?.token && state.sync.memberId) return state.sync.memberId;
+  return state.selfId || state.meId || null;
 }
 
 /** 이 기기에서 기록하는 사람 (구성원 전환 시트에서 바꿀 수 있음) */

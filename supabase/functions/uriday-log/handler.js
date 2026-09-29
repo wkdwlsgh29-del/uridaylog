@@ -12,6 +12,8 @@
 //   · 기록 충돌은 updatedAt 기준 LWW(나중에 고친 것이 이김). 삭제는 툼스톤(deleted=true).
 //   · 클라이언트 입력은 전부 검증: 타입 화이트리스트, uuid 형식, 숫자 범위, 문자열 길이(잘라냄),
 //     타입별 허용 키 외에는 버림, jsonb 가 거부하는 \u0000·짝 없는 서로게이트 제거.
+//   · updatedAt(LWW 시각)은 '서버 시각 + 10분'까지로 자른다 — 먼 미래 값으로 기록·프로필·아기 정보를 영영 못 고치게
+//     만드는 것 방지. 잘린 값은 응답의 서버본으로 돌아가고 앱은 그 값을 받아들인다 (sync.js mergeServer).
 // 보안
 //   · 기기 토큰·초대코드는 sha256 해시만 저장·비교한다. 토큰·요청 본문·URL 은 절대 로그에 남기지 않는다.
 //   · devices.last_seen_at 같은 기기별 활동 정보는 서버 내부용 — 응답에 절대 싣지 않는다(시터 사생활).
@@ -20,15 +22,21 @@
 //   create { family, members[≤20], meId, events[≤2000] } → { token, invite, familyId, me, family, members, rev:0, rejected }
 //   peek   { invite }                                    → { family:{name}, members:[{id,name,role,emoji,claimed}] }
 //   peek   { device }  (기기 연결 코드, 쓰지 않음)         → { family:{name}, member:{id,name,role,emoji} }
-//   join   { invite, claim(기기 없는 자리만) | me:{id?,name,role,emoji} } → { token, familyId, me, family, members, rev:0 }
-//   join   { device }  (1회용·15분)                      → 위와 같은 모양 (코드를 만든 그 사람으로 연결)
+//   join   { invite, claim(기기 없는 자리만) | me:{id?,name,role,emoji}, nonce? } → { token, familyId, me, family, members, rev:0 }
+//   join   { device, nonce? }  (1회용·15분)              → 위와 같은 모양 (코드를 만든 그 사람으로 연결)
+//          nonce: 참여 시트 하나당 한 번 만드는 비밀 값. 응답이 끊겨 같은 nonce 로 다시 오면 그때 만든 기기의 토큰을
+//          새로 바꿔 돌려준다 (자리를 두 번 만들거나 403 '이미 쓰는 사람'이 되지 않게).
 //   devlink { k }                                        → { code, expiresAt }  (내 다른 기기 연결 코드)
+//   quickkey { k }                                       → { quick }  잠금화면 단축어용 '기록 전용' 키 (새로 만들면 옛 키는 멈춤)
+//   signout { k }                                        → { members }  내 다른 기기 연결을 모두 끊기 (이 기기만 남김)
 //   sync   { k, since, push[≤500], members[≤20], family? } → { events, more, rev, members, family, me, serverTime, rejected,
 //                                                             rejectedMembers?, reset? }
-//   invite { k } (관리자) → { invite } · remove { k, memberId } (관리자) → { members } · admin { k, memberId, on } → { members }
-//   unlink { k, memberId } (관리자, 나 자신 X) → { members }  — 내보내지 않고 기기만 모두 끊기 (다시 차지 가능한 자리로)
+//   invite { k } (관리자) → { invite } · admin { k, memberId, on } → { members }
+//   remove { k, memberId } (관리자) → { members, invite }  — 내보내면서 초대 코드도 새로 바꾼다 (내보낸 사람이 옛 링크로 다시 못 들어오게)
+//   unlink { k, memberId } (관리자, 나 자신 X) → { members }  — 내보내지 않고 기기만 모두 끊기 (다시 차지 가능한 자리로; 관리자 권한도 해제)
 //   leave  { k } → {}
-//   quick  POST ?a=q&k=TOKEN&t=TYPE[&ml=&side=&min=&color=&texture=&c=&name=&result=&text=&say=&src=notif&id=&ts=]
+//   quick  POST ?a=q&k=KEY&t=TYPE[&ml=&side=&min=&color=&texture=&c=&name=&result=&text=&say=&src=notif&id=&ts=]
+//          KEY = 기록 전용 키(quickkey) 또는 기기 토큰. k 는 쿼리 대신 본문(form/JSON)이나 x-bl-key 헤더로 보내도 된다.
 //          → text/plain "✓ 소변 기록 · 오후 3:12 · 아빠\n오늘 소변 6번째"
 import { parseSay } from './parse.js';
 
@@ -47,6 +55,7 @@ const TS_MIN = 946684800000; // 2000-01-01 — 이보다 이른 epoch ms 는 잘
 const TS_MAX = 4102444800000; // 2100-01-01
 const MIN = 60 * 1000;
 const DAY = 24 * 60 * MIN;
+export const FUTURE_MS = 10 * MIN; // updatedAt 은 서버 시각 + 이만큼까지 (앱 sync.js 의 UPDATED_AT_FUTURE_MS 와 같게)
 
 const ROLES = ['mom', 'dad', 'sitter', 'grandma', 'grandpa', 'other'];
 const ROLE_LABEL = { mom: '엄마', dad: '아빠', sitter: '시터', grandma: '할머니', grandpa: '할아버지', other: '가족' };
@@ -151,6 +160,18 @@ function epochOf(v) {
   if (n == null) return null;
   const r = Math.round(n);
   return r >= TS_MIN && r <= TS_MAX ? r : null;
+}
+// LWW 시각: 너무 이르면 거부(null), 미래는 nowMs + FUTURE_MS 로 자른다 (nowMs 가 없으면 자르지 않음)
+function updOf(v, nowMs) {
+  const n = numOf(v);
+  if (n == null) return null;
+  const r = Math.round(n);
+  if (r < TS_MIN) return null;
+  return nowMs == null ? (r <= TS_MAX ? r : null) : Math.min(r, nowMs + FUTURE_MS);
+}
+// 참여 nonce (앱이 참여 시트마다 한 번 만드는 비밀 값): 16~128자 base64url
+function nonceOf(v) {
+  return typeof v === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(v) ? v : null;
 }
 // 문자열 정리: 짝 없는 서로게이트 → U+FFFD, 제어문자 제거(여러 줄 허용 시 \n·\t 유지), 코드포인트 기준 max 자로 자름
 function cleanStr(v, max, { multiline = false } = {}) {
@@ -284,14 +305,14 @@ function cleanData(type, raw, deleted) {
 }
 
 // 기록 한 건 정리 → { row } | { reject: id }
-function cleanEvent(raw, memberIds) {
+function cleanEvent(raw, memberIds, nowMs) {
   if (!isObj(raw)) return { reject: null };
   const id = uuidOf(raw.id);
   const rid = typeof raw.id === 'string' ? raw.id.slice(0, 64) : null;
   if (!id) return { reject: rid };
   const type = typeof raw.type === 'string' && Object.hasOwn(TYPES, raw.type) ? raw.type : null;
   const ts = epochOf(raw.ts);
-  const updatedAt = epochOf(raw.updatedAt);
+  const updatedAt = updOf(raw.updatedAt, nowMs);
   if (!type || ts == null || updatedAt == null) return { reject: id };
   const deleted = raw.deleted === true;
   const data = cleanData(type, raw.data, deleted);
@@ -299,11 +320,11 @@ function cleanEvent(raw, memberIds) {
   const by = uuidOf(raw.by);
   return { row: { id, type, ts, member_id: by && memberIds.has(by) ? by : null, data, deleted, updated_at: updatedAt } };
 }
-function prepareEvents(list, memberIds) {
+function prepareEvents(list, memberIds, nowMs) {
   const byId = new Map();
   const rejected = [];
   for (const raw of list) {
-    const r = cleanEvent(raw, memberIds);
+    const r = cleanEvent(raw, memberIds, nowMs);
     if (!r.row) {
       if (r.reject) rejected.push(r.reject);
       continue;
@@ -315,14 +336,14 @@ function prepareEvents(list, memberIds) {
 }
 
 // 구성원 한 명 정리 (프로필 필드만; isAdmin/claimed/revoked 는 서버 소유라 무시)
-function cleanMember(raw) {
+function cleanMember(raw, nowMs) {
   if (!isObj(raw)) return null;
   const id = uuidOf(raw.id);
   if (!id) return null;
   const role = ROLES.includes(raw.role) ? raw.role : 'other';
   const name = cleanStr(raw.name, 12) || ROLE_LABEL[role];
   const emoji = cleanEmoji(raw.emoji) || ROLE_EMOJI[role];
-  return { id, name, role, emoji, updated_at: epochOf(raw.updatedAt) ?? 0 };
+  return { id, name, role, emoji, updated_at: updOf(raw.updatedAt, nowMs) ?? 0 };
 }
 function dedupeMembers(list) {
   const m = new Map();
@@ -330,9 +351,9 @@ function dedupeMembers(list) {
   return [...m.values()];
 }
 // 가족 정보 패치: 보낸 필드만 반영 (name/birth 가 undefined 면 그대로 둠)
-function cleanFamily(raw, fallbackUpdatedAt) {
+function cleanFamily(raw, fallbackUpdatedAt, nowMs) {
   if (!isObj(raw)) return null;
-  const updatedAt = epochOf(raw.updatedAt) ?? fallbackUpdatedAt;
+  const updatedAt = updOf(raw.updatedAt, nowMs) ?? fallbackUpdatedAt;
   if (updatedAt == null) return null;
   return {
     name: raw.name === undefined ? null : cleanStr(raw.name, 10) ?? '',
@@ -543,20 +564,23 @@ export function createHandler({ sql, now = () => Date.now(), salt = '' }) {
   }
 
   // 기기 토큰 확인. lock=true 면 가족 행을 잠근 뒤(쓰기 직렬화) 최신 상태로 다시 확인한다.
-  async function authDevice(t, hash, lock) {
+  // quick=true 는 잠금화면 단축어용: 기록 전용 키(devices.quick_hash)도 받는다 — 다른 모든 동작은 기기 토큰만.
+  async function authDevice(t, hash, lock, { quick = false } = {}) {
+    const match = quick ? t`(d.token_hash = ${hash} or d.quick_hash = ${hash})` : t`d.token_hash = ${hash}`;
     if (lock) {
-      const [d] = await t`select family_id from uriday.devices where token_hash = ${hash}`;
+      const [d] = await t`select d.family_id from uriday.devices d where ${match}`;
       if (!d) throw new HttpError(401, 'unauthorized');
       await t`select 1 from uriday.families where id = ${d.family_id} for update`;
     }
     const [me] = await t`
-      select d.family_id, d.member_id, m.is_admin, m.name, m.role, m.emoji
+      select d.family_id, d.member_id, d.token_hash, m.is_admin, m.name, m.role, m.emoji
       from uriday.devices d
       join uriday.members m on m.family_id = d.family_id and m.id = d.member_id
-      where d.token_hash = ${hash} and d.revoked_at is null and m.revoked_at is null`;
+      where ${match} and d.revoked_at is null and m.revoked_at is null`;
     if (!me) throw new HttpError(401, 'unauthorized');
     return me;
   }
+  // 마지막 사용 시각 (기기 토큰의 해시로 — 기록 전용 키로 왔어도 auth 가 돌려준 그 기기의 token_hash)
   const touch = (t, hash) =>
     t`update uriday.devices set last_seen_at = now()
       where token_hash = ${hash} and (last_seen_at is null or last_seen_at < now() - interval '1 minute')`;
@@ -632,17 +656,17 @@ export function createHandler({ sql, now = () => Date.now(), salt = '' }) {
   // ── create ─────────────────────────────────────────────────────────────
   async function actCreate(body, req) {
     const nowMs = now();
-    const fam = cleanFamily(body.family, nowMs);
+    const fam = cleanFamily(body.family, nowMs, nowMs);
     if (!fam) throw bad('아기 정보(family)가 필요해요');
     const rawMembers = arrayOf(body.members, LIMITS.membersPerRequest, '구성원(members)');
     if (!rawMembers.length) throw bad('구성원(members)이 한 명 이상 필요해요');
-    const members = rawMembers.map(cleanMember);
+    const members = rawMembers.map((x) => cleanMember(x, nowMs));
     if (members.some((m) => !m)) throw bad('구성원 id 는 uuid 여야 해요');
     const list = dedupeMembers(members);
     const meId = uuidOf(body.meId);
     if (!meId || !list.some((m) => m.id === meId)) throw bad('meId 가 구성원 목록에 없어요');
     const events = arrayOf(body.events, LIMITS.createEvents, '기록(events)', { status: 413 });
-    const { rows, rejected } = prepareEvents(events, new Set(list.map((m) => m.id)));
+    const { rows, rejected } = prepareEvents(events, new Set(list.map((m) => m.id)), nowMs);
     await rateLimit('create', req); // 형식 검증을 통과한 요청만 센다
     const token = randomToken();
     const invite = randomInvite();
@@ -711,10 +735,30 @@ export function createHandler({ sql, now = () => Date.now(), salt = '' }) {
     return rows[0] || null;
   }
 
-  // 새 기기 토큰 발급 + join 응답 (초대·기기 연결 공통)
-  async function issueDevice(t, fid, memberId) {
+  // 새 기기 토큰 발급 + join 응답 (초대·기기 연결 공통). joinHash = sha256(참여 nonce) — 응답 유실 후 재시도 확인용
+  async function issueDevice(t, fid, memberId, joinHash = null) {
     const token = randomToken();
-    await t`insert into uriday.devices (token_hash, family_id, member_id) values (${await sha256hex(token)}, ${fid}, ${memberId})`;
+    await t`
+      insert into uriday.devices (token_hash, family_id, member_id, join_hash)
+      values (${await sha256hex(token)}, ${fid}, ${memberId}, ${joinHash})`;
+    return joinReply(t, fid, memberId, token);
+  }
+  // 같은 nonce 로 다시 온 참여(앞 응답이 끊김): 그때 만든 기기(하루 안, 아직 안 끊김)를 찾는다
+  async function findJoinedDevice(t, fid, joinHash) {
+    if (!joinHash) return null;
+    const [d] = await t`
+      select token_hash, member_id from uriday.devices
+      where family_id = ${fid} and join_hash = ${joinHash} and revoked_at is null and created_at > now() - interval '1 day'
+      order by created_at desc limit 1`;
+    return d || null;
+  }
+  // 그 기기의 토큰을 새로 바꿔 돌려준다 (앞 토큰은 아무도 받지 못했으므로)
+  async function reissueDevice(t, fid, d) {
+    const token = randomToken();
+    await t`update uriday.devices set token_hash = ${await sha256hex(token)}, quick_hash = null where token_hash = ${d.token_hash}`;
+    return joinReply(t, fid, d.member_id, token);
+  }
+  async function joinReply(t, fid, memberId, token) {
     const members = await loadMembers(t, fid);
     const me = members.find((x) => x.id === memberId);
     return {
@@ -735,52 +779,68 @@ export function createHandler({ sql, now = () => Date.now(), salt = '' }) {
   async function actJoin(body, req) {
     await rateLimit('join', req);
     const { kind, code } = pickCode(body);
-    if (kind === 'device') return joinByDeviceLink(code);
+    if (kind === 'device') return joinByDeviceLink(code, nonceOf(body.nonce));
     if (!code) throw new HttpError(404, 'invite_invalid');
     const claim = body.claim == null || body.claim === '' ? null : uuidOf(body.claim);
     if (body.claim != null && body.claim !== '' && !claim) throw bad('claim 은 구성원 id(uuid)여야 해요');
     let meIn = null;
     if (!claim) {
       if (!isObj(body.me)) throw bad('참여할 사람(claim 또는 me)을 골라 주세요');
-      meIn = cleanMember({ ...body.me, id: body.me.id ?? crypto.randomUUID() });
+      meIn = cleanMember({ ...body.me, id: body.me.id ?? crypto.randomUUID() }, now());
       if (!meIn) throw bad('me.id 는 uuid 여야 해요');
     }
     const ih = await sha256hex(code);
+    const nonce = nonceOf(body.nonce);
+    const jh = nonce ? await sha256hex(`join|${nonce}`) : null;
 
     return tx(async (t) => {
       const [f] = await t`select id from uriday.families where invite_hash = ${ih} for update`;
       if (!f) throw new HttpError(404, 'invite_invalid');
       const fid = f.id;
       const memberId = claim || meIn.id;
-      const [m] = await t`
+      const memberRow = () => t`
         select m.id, m.revoked_at,
                exists (select 1 from uriday.devices d
                        where d.family_id = m.family_id and d.member_id = m.id and d.revoked_at is null) as active
         from uriday.members m where m.family_id = ${fid} and m.id = ${memberId}`;
+      let [m] = await memberRow();
       if (claim && !m) throw bad('고른 사람을 이 가족에서 찾을 수 없어요');
       if (m?.revoked_at) throw new HttpError(403, 'forbidden', '이 사람은 가족 공유에서 빠졌어요. 새 사람으로 참여하거나 관리자에게 물어봐 주세요');
+      // 응답이 끊겨 다시 누른 참여: 같은 사람이면 그 기기를 이어 주고, 다른 사람을 골랐으면 아무도 못 받은 옛 기기는 끊는다
+      const prev = await findJoinedDevice(t, fid, jh);
+      if (prev && prev.member_id === memberId) return reissueDevice(t, fid, prev);
+      if (prev) {
+        await t`update uriday.devices set revoked_at = now() where token_hash = ${prev.token_hash}`;
+        [m] = await memberRow();
+      }
       // 이미 기기가 있는 사람은 초대 링크로 차지할 수 없다 (me.id 로 같은 id 를 보내도 마찬가지)
       if (m?.active) throw new HttpError(403, 'forbidden', MSG.claimed);
       if (!m) {
         const skipped = await upsertMembers(t, fid, [meIn]);
         if (skipped.length) throw bad(`가족 구성원은 ${LIMITS.membersPerFamily}명까지예요`);
       }
-      return issueDevice(t, fid, memberId);
+      return issueDevice(t, fid, memberId, jh);
     });
   }
 
-  async function joinByDeviceLink(code) {
+  async function joinByDeviceLink(code, nonce) {
     const invalid = () => new HttpError(404, 'invite_invalid', MSG.device_invalid);
     if (!code) throw invalid();
     const hash = await sha256hex(code);
+    const jh = nonce ? await sha256hex(`join|${nonce}`) : null;
     return tx(async (t) => {
-      const [l0] = await t`select family_id from uriday.device_links where code_hash = ${hash}`;
+      const [l0] = await t`select family_id, member_id from uriday.device_links where code_hash = ${hash}`;
       if (!l0) throw invalid();
       await t`select 1 from uriday.families where id = ${l0.family_id} for update`;
       const link = await findDeviceLink(t, hash, { lock: true }); // 잠근 뒤 다시 확인 → 동시에 두 번 써도 한 번만
-      if (!link) throw invalid();
+      if (!link) {
+        // 이미 쓴 코드: 같은 참여(nonce)가 응답을 못 받고 다시 온 것이면 그 기기를 이어 준다
+        const prev = await findJoinedDevice(t, l0.family_id, jh);
+        if (prev && prev.member_id === l0.member_id) return reissueDevice(t, l0.family_id, prev);
+        throw invalid();
+      }
       await t`update uriday.device_links set used_at = now() where code_hash = ${hash}`;
-      return issueDevice(t, link.family_id, link.member_id);
+      return issueDevice(t, link.family_id, link.member_id, jh);
     });
   }
 
@@ -794,14 +854,14 @@ export function createHandler({ sql, now = () => Date.now(), salt = '' }) {
       if (n == null || n < 0 || !Number.isSafeInteger(Math.round(n))) throw bad('since 는 0 이상의 정수여야 해요');
       since = Math.round(n);
     }
+    const nowMs = now();
     const push = arrayOf(body.push, LIMITS.push, '기록(push)', { status: 413 });
     const mp = arrayOf(body.members, LIMITS.membersPerRequest, '구성원(members)');
-    const fp = body.family != null ? cleanFamily(body.family, null) : null;
-    const members = dedupeMembers(mp.map(cleanMember).filter(Boolean));
-    const rejectedMembers = mp.filter((x) => !cleanMember(x)).map((x) => (isObj(x) && typeof x.id === 'string' ? x.id.slice(0, 64) : null)).filter(Boolean);
+    const fp = body.family != null ? cleanFamily(body.family, null, nowMs) : null;
+    const members = dedupeMembers(mp.map((x) => cleanMember(x, nowMs)).filter(Boolean));
+    const rejectedMembers = mp.filter((x) => !cleanMember(x, nowMs)).map((x) => (isObj(x) && typeof x.id === 'string' ? x.id.slice(0, 64) : null)).filter(Boolean);
     const writes = push.length > 0 || members.length > 0 || !!fp;
     const hash = await sha256hex(k);
-    const nowMs = now();
 
     return tx(async (t) => {
       const me = await authDevice(t, hash, writes);
@@ -831,7 +891,7 @@ export function createHandler({ sql, now = () => Date.now(), salt = '' }) {
       let rejected = [];
       let lost = [];
       if (push.length) {
-        const prepared = prepareEvents(push, await memberIdSet(t, fid));
+        const prepared = prepareEvents(push, await memberIdSet(t, fid), nowMs);
         rejected = prepared.rejected;
         const applied = await upsertEvents(t, fid, prepared.rows);
         // LWW 로 밀린(서버가 더 최신인) 기록: 커서 뒤라 pull 에 안 나오면 서버본을 같이 돌려준다
@@ -905,11 +965,16 @@ export function createHandler({ sql, now = () => Date.now(), salt = '' }) {
         update uriday.devices set revoked_at = coalesce(revoked_at, now())
         where family_id = ${me.family_id} and member_id = ${target}`;
       await t`delete from uriday.device_links where family_id = ${me.family_id} and member_id = ${target}`;
-      return { ok: true, members: await loadMembers(t, me.family_id) };
+      // 초대 코드도 바꾼다 — 내보낸 사람이 갖고 있던 옛 초대 링크로 '새 사람'이 되어 다시 들어오지 못하게
+      const invite = randomInvite();
+      await t`update uriday.families set invite_hash = ${await sha256hex(invite)}, invite_at = now() where id = ${me.family_id}`;
+      return { ok: true, members: await loadMembers(t, me.family_id), invite };
     });
 
   // 기기 연결 끊기(관리자): 그 사람을 내보내지 않고 기기만 모두 끊는다 → 다시 초대 링크로 차지할 수 있는 자리가 된다.
   //   (폰을 잃어버렸을 때 복구용. 기록의 by 는 그대로 유지. 내 기기는 '이 기기 공유 끊기(leave)'로.)
+  //   관리자 권한도 해제한다 — 초대 링크만 가진 다른 사람이 그 자리를 먼저 차지해 관리자가 되지 않게.
+  //   (끊은 관리자가 있으니 본인이 다시 연결하면 다시 지정해 주면 된다)
   const actUnlink = (body) =>
     withMe(body, async (t, me) => {
       needAdmin(me);
@@ -922,6 +987,7 @@ export function createHandler({ sql, now = () => Date.now(), salt = '' }) {
         update uriday.devices set revoked_at = now()
         where family_id = ${me.family_id} and member_id = ${target} and revoked_at is null`;
       await t`delete from uriday.device_links where family_id = ${me.family_id} and member_id = ${target}`;
+      await t`update uriday.members set is_admin = false where family_id = ${me.family_id} and id = ${target}`;
       return { ok: true, members: await loadMembers(t, me.family_id) };
     });
 
@@ -960,10 +1026,40 @@ export function createHandler({ sql, now = () => Date.now(), salt = '' }) {
       return { ok: true, code, expiresAt };
     });
 
+  // 이 기기 공유 끊기. 그 사람의 마지막 기기였고 다른 관리자가 있으면 관리자 권한도 내려놓는다
+  // (빈 관리자 자리를 초대 링크로 누가 먼저 차지해 관리자가 되지 않게. 관리자가 혼자면 가족에 관리자가 없어지므로 유지).
   const actLeave = (body) =>
     withMe(body, async (t, me, hash) => {
       await t`update uriday.devices set revoked_at = now() where token_hash = ${hash}`;
+      if (me.is_admin) {
+        await t`
+          update uriday.members m set is_admin = false
+          where m.family_id = ${me.family_id} and m.id = ${me.member_id}
+            and not exists (select 1 from uriday.devices d
+                            where d.family_id = m.family_id and d.member_id = m.id and d.revoked_at is null)
+            and exists (select 1 from uriday.members o
+                        where o.family_id = m.family_id and o.id <> m.id and o.is_admin and o.revoked_at is null)`;
+      }
       return { ok: true };
+    });
+
+  // 잠금화면 단축어용 기록 전용 키 (이 기기에 묶임). 새로 만들면 옛 키는 바로 멈춘다.
+  // 이 키로는 quick(기록 한 건)만 된다 — 동기화(전체 기록 읽기)·초대·기기 연결·관리 동작은 기기 토큰만 받는다.
+  const actQuickKey = (body) =>
+    withMe(body, async (t, me, hash) => {
+      const quick = randomToken();
+      await t`update uriday.devices set quick_hash = ${await sha256hex(quick)} where token_hash = ${hash}`;
+      return { ok: true, quick };
+    });
+
+  // 내 다른 기기 연결 모두 끊기 (이 기기만 남김) — 토큰이 샜을 때 스스로 정리
+  const actSignout = (body) =>
+    withMe(body, async (t, me, hash) => {
+      await t`
+        update uriday.devices set revoked_at = now()
+        where family_id = ${me.family_id} and member_id = ${me.member_id} and token_hash <> ${hash} and revoked_at is null`;
+      await t`delete from uriday.device_links where family_id = ${me.family_id} and member_id = ${me.member_id}`;
+      return { ok: true, members: await loadMembers(t, me.family_id) };
     });
 
   // ── quick (단축어·알림) ─────────────────────────────────────────────────
@@ -1019,11 +1115,12 @@ export function createHandler({ sql, now = () => Date.now(), salt = '' }) {
     return `${day} ${parts.join(' · ')}`;
   }
 
-  function quickPlan(p) {
+  // ageDays: 가족 생후 일수 (받아쓰기 '우유'를 돌 이후엔 우유로 보기 위해 — 토큰 확인 뒤 다시 부를 때만 넘긴다)
+  function quickPlan(p, ageDays = null) {
     const t = (p.t || '').trim().toLowerCase();
     const sayText = p.say ?? p.text ?? '';
     if (t === 'say' || (!t && sayText.trim())) {
-      const r = parseSay(sayText);
+      const r = parseSay(sayText, { ageDays });
       if (!r) {
         const echo = cleanStr(sayText, 40) || '(빈 말)';
         throw new HttpError(400, 'bad_request', `알아듣지 못했어요: ${echo}\n예) 분유 120 · 쉬했어 · 응가 노란색 · 잠들었어 · 깼어 · 모유 왼쪽 10분`);
@@ -1083,7 +1180,7 @@ export function createHandler({ sql, now = () => Date.now(), salt = '' }) {
   async function actQuick(p) {
     const k = tokenOf(p.k);
     if (!k) throw new HttpError(401, 'unauthorized', QUICK_401);
-    const plan = quickPlan(p); // 토큰 확인 전에 말 해석 (DB 안 씀)
+    let plan = quickPlan(p); // 토큰 확인 전에 말 해석 (DB 안 씀) — 못 알아들으면 여기서 400
     const hash = await sha256hex(k);
     const nowMs = now();
     let at = nowMs;
@@ -1096,13 +1193,19 @@ export function createHandler({ sql, now = () => Date.now(), salt = '' }) {
     return tx(async (t) => {
       let me;
       try {
-        me = await authDevice(t, hash, true);
+        me = await authDevice(t, hash, true, { quick: true });
       } catch (e) {
         if (e instanceof HttpError && e.status === 401) throw new HttpError(401, 'unauthorized', QUICK_401);
         throw e;
       }
-      await touch(t, hash);
+      await touch(t, me.token_hash);
       const fid = me.family_id;
+      const birthOfFamily = async () => {
+        const [f] = await t`select to_char(birth_date, 'YYYY-MM-DD') as birth from uriday.families where id = ${fid}`;
+        return f?.birth || null;
+      };
+      // 받아쓰기는 아기 나이를 알고 다시 해석 ('우유 200' = 돌 전엔 분유, 돌 이후엔 우유)
+      if (plan.src === 'say') plan = quickPlan(p, ageDays(await birthOfFamily(), at));
       const who = me.name || ROLE_LABEL[me.role] || '';
       const line1 = (what, ts = at) => `✓ ${what} · ${fmtTime(ts)} · ${who}`;
 
@@ -1122,26 +1225,27 @@ export function createHandler({ sql, now = () => Date.now(), salt = '' }) {
         update uriday.events
         set data = data || ${sql.json(patch)}, updated_at = greatest(${nowMs}::bigint, updated_at + 1), rev = nextval('uriday.rev_seq')
         where family_id = ${fid} and id = ${id}`;
-      const ongoingSleep = async () => {
-        const [s] = await t`
+      // 끝나지 않은 잠 전부 (가장 먼저 시작한 것부터). 두 기기가 따로 '재우기'를 눌러도 아기 잠은 하나라서
+      // '깼어요'는 모두에 끝을 넣는다 — 앱 store.toggleSleep · logic.sleepState 와 같은 규칙.
+      const openSleeps = async () => (await t`
           select id, ts from uriday.events
           where family_id = ${fid} and type = 'sleep' and not deleted and not (data ? 'end')
             and ts > ${at - DAY} and ts <= ${at + 5 * MIN}
-          order by ts desc, rev desc limit 1`;
-        return s ? { id: s.id, ts: Number(s.ts) } : null;
-      };
+          order by ts, rev`).map((r) => ({ id: r.id, ts: Number(r.ts) }));
 
       // 잠: 토글 / 시작 / 끝
       if (plan.kind === 'sleep_toggle' || plan.kind === 'sleep_start' || plan.kind === 'sleep_end') {
-        const s = await ongoingSleep();
-        if (s && plan.kind !== 'sleep_start') {
-          const end = Math.max(at, s.ts);
-          await bump(s.id, { end });
-          const dur = fmtDur((end - s.ts) / MIN);
+        const open = await openSleeps();
+        const first = open[0];
+        if (first && plan.kind !== 'sleep_start') {
+          for (const s of open) await bump(s.id, { end: Math.max(at, s.ts) });
+          const end = Math.max(at, first.ts);
+          const dur = fmtDur((end - first.ts) / MIN);
           return text(`${line1(`잠 끝 (${dur})`, end)}\n😴 ${dur} 잤어요`);
         }
-        if (s) return text(`✓ 이미 재우는 중 · ${fmtTime(s.ts)}부터 (${fmtDur((at - s.ts) / MIN)}째)`, 409);
-        if (plan.kind === 'sleep_end') return text('진행 중인 잠 기록이 없어요 · 앱에서 잠든 시간을 넣어 주세요', 409);
+        // 409 는 기록하지 않았다는 뜻 — 단축어 알림이 성공(✓)처럼 보이지 않게 ⚠ 로 시작
+        if (first) return text(`⚠ 이미 재우는 중 · ${fmtTime(first.ts)}부터 (${fmtDur((at - first.ts) / MIN)}째)`, 409);
+        if (plan.kind === 'sleep_end') return text('⚠ 진행 중인 잠 기록이 없어요 · 앱에서 잠든 시간을 넣어 주세요', 409);
         await insert('sleep', {}, reqId || undefined);
         return text(`${line1('잠 시작')}\n😴 깨면 한 번 더 기록하면 끝나요`);
       }
@@ -1155,8 +1259,19 @@ export function createHandler({ sql, now = () => Date.now(), salt = '' }) {
           order by ts desc, rev desc limit 1`;
         if (f && !(f.data && Object.hasOwn(f.data, 'burp'))) {
           await bump(f.id, { burp: 'yes' });
-          const cl = await countLine(t, fid, ['burp'], at, nowMs);
-          return text(`${line1('트림 기록')}\n${cl} · ${fmtTime(Number(f.ts))} ${TYPES[f.type].label}에 표시`);
+          // 요청 id 를 지운 트림(툼스톤)으로 남긴다 — 응답이 끊겨 알림 버튼이 같은 id 를 앱 수신함에 넣어도
+          // 위의 id 확인에 걸리고, 앱이 올린 같은 id 의 트림은 이 툼스톤(더 새 updatedAt)에 밀려 지워진다.
+          if (reqId) {
+            await t`
+              insert into uriday.events (family_id, id, member_id, type, ts, data, deleted, updated_at, rev)
+              values (${fid}, ${reqId}, ${me.member_id}, 'burp', ${at}, ${sql.json({ src })}, true,
+                      ${Math.max(nowMs, at + 1)}, nextval('uriday.rev_seq'))`;
+          }
+          // 자정 전 수유에 붙인 트림은 그 수유가 있는 날의 횟수로 센다 ('오늘 트림 0번째' 방지)
+          const fts = Number(f.ts);
+          const countAt = seoulDayStart(fts) === seoulDayStart(at) ? at : seoulDayStart(at) - 1;
+          const cl = await countLine(t, fid, ['burp'], countAt, nowMs);
+          return text(`${line1('트림 기록')}\n${cl} · ${fmtTime(fts)} ${TYPES[f.type].label}에 표시`);
         }
         await insert('burp', {}, reqId || undefined);
         return text(`${line1('트림 기록')}\n${await countLine(t, fid, ['burp'], at, nowMs)}`);
@@ -1183,8 +1298,7 @@ export function createHandler({ sql, now = () => Date.now(), salt = '' }) {
       const clean = await insert(type, data, reqId || undefined);
       let extra = '';
       if (type === 'temp' && clean.c >= 38) {
-        const [f] = await t`select to_char(birth_date, 'YYYY-MM-DD') as birth from uriday.families where id = ${fid}`;
-        const age = ageDays(f?.birth, at);
+        const age = ageDays(await birthOfFamily(), at);
         extra = age != null && age < 91
           ? '\n⚠️ 3개월 미만 아기의 38℃ 이상 발열은 바로 병원 진료가 필요해요'
           : '\n🌡️ 열이 있어요. 아기 상태를 잘 살펴 주세요';
@@ -1207,6 +1321,7 @@ export function createHandler({ sql, now = () => Date.now(), salt = '' }) {
   const ACTIONS = {
     create: actCreate, peek: actPeek, join: actJoin, sync: actSync, invite: actInvite,
     remove: actRemove, unlink: actUnlink, admin: actAdmin, leave: actLeave, devlink: actDevlink,
+    quickkey: actQuickKey, signout: actSignout,
   };
 
   // ── 진입점 ─────────────────────────────────────────────────────────────

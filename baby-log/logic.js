@@ -323,6 +323,7 @@ function sleepEnd(e, cap) {
  *   sleepMin, sleeps, byType:{type:n}, last:{type:event} }
  * 잠은 구간과 겹치는 만큼만 센다 (자정을 넘는 잠은 양쪽 날에 나눠 들어감). 끝나지 않은 잠은
  * min(to, now) 까지 — '오늘' 통계라면 now 를 넘기거나 to=now 로 부른다.
+ * 겹치는 잠 기록(두 기기가 따로 '재우기'를 누름)은 아기 잠 하나로 합쳐서 센다 — sleepState 와 같은 규칙.
  */
 export function statsBetween(events, from, to, now = to) {
   const out = {
@@ -330,11 +331,12 @@ export function statsBetween(events, from, to, now = to) {
     pee: 0, poop: 0, sleepMin: 0, sleeps: 0, byType: {}, last: {},
   };
   const cap = Math.min(to, isNum(now) ? now : to);
+  const spans = [];
   for (const e of live(events)) {
     if (e.type === 'sleep') {
       const s = Math.max(e.ts, from);
       const en = Math.min(sleepEnd(e, cap), to);
-      if (en > s) { out.sleepMin += (en - s) / MIN; out.sleeps += 1; }
+      if (en > s) spans.push([s, en]);
     }
     if (e.ts < from || e.ts >= to) continue;
     out.byType[e.type] = (out.byType[e.type] || 0) + 1;
@@ -349,6 +351,14 @@ export function statsBetween(events, from, to, now = to) {
     if (isPoop(e)) out.poop += 1;
   }
   out.bottleMl = out.formulaMl + out.pumpedMl;
+  // 잠 구간 합치기 (live 는 시작 시각 순이라 spans 도 시작 순)
+  let cur = null;
+  for (const [s, en] of spans) {
+    if (cur && s < cur[1]) { cur[1] = Math.max(cur[1], en); continue; }
+    if (cur) { out.sleepMin += (cur[1] - cur[0]) / MIN; out.sleeps += 1; }
+    cur = [s, en];
+  }
+  if (cur) { out.sleepMin += (cur[1] - cur[0]) / MIN; out.sleeps += 1; }
   out.sleepMin = Math.round(out.sleepMin);
   return out;
 }
@@ -683,7 +693,10 @@ const LEVEL_RANK = { urgent: 0, check: 1, info: 2 };
 
 /**
  * 부드러운 참고 힌트 → [{ id, level:'info'|'check'|'urgent', text, link? }] (급한 것 먼저)
- * - 대변 색(48시간 이내 마지막 색 기록) · 생후 3개월 미만 38℃ 이상 = urgent
+ * - 대변 색: 48시간 안의 색 기록 중 가장 급한 것(흰색·회색 urgent > 피 check) — 뒤에 정상 색 변이 나와도 유지.
+ *   나이는 그 변을 본 날 기준 (생후 3일 태변이 자정이 지나 '진료' 경고로 바뀌지 않게). 급한 게 없으면 마지막 색의 안내(info).
+ * - 체온: 24시간 안에 '그때 생후 3개월 미만'이면서 38℃ 이상인 기록이 하나라도 있으면 urgent — 다시 재서 정상이어도,
+ *   자정이 지나 90일이 돼도 사라지지 않는다. 그 밖에는 마지막 체온이 38℃ 이상일 때 info.
  * - 신생아 4시간 수유 공백 · 소변 기저귀 적음(기록이 꾸준할 때만) · 8시간 소변 없음(그 뒤 다른 기록 3개 이상일 때만)
  * - 분유 하루 960ml 초과 · 6개월 전 물 · 돌 전 우유 / 우유 500ml 초과 · 수유 간격이 보통보다 김(밤 제외)
  */
@@ -693,18 +706,27 @@ export function hints(stage, events, now = Date.now(), family = {}) {
   const lv = live(events).filter((e) => e.ts <= now + MIN);
   const add = (id, level, text, link) => out.push(link ? { id, level, text, link } : { id, level, text });
 
-  // 대변 색
-  const lastColored = [...lv].reverse().find((e) => e.type === 'poop' && e.data?.color);
-  if (lastColored && now - lastColored.ts <= 48 * HOUR) {
-    const a = poopAlert(lastColored, age);
+  // 대변 색 (48시간 안 전부, 그 변을 본 날의 나이로)
+  const colored = lv.filter((e) => e.type === 'poop' && e.data?.color && now - e.ts <= 48 * HOUR);
+  let worstPoop = null;
+  for (const e of colored) {
+    const a = poopAlert(e, ageDays(family?.birth, e.ts));
+    if (!a || a.level === 'info') continue;
+    if (!worstPoop || LEVEL_RANK[a.level] <= LEVEL_RANK[worstPoop.a.level]) worstPoop = { e, a };   // 같은 등급이면 최근 것
+  }
+  if (worstPoop) add('poop-color', worstPoop.a.level, `${fmtTime(worstPoop.e.ts)} 대변 — ${worstPoop.a.text}`);
+  else if (colored.length) {
+    const lastC = colored[colored.length - 1];
+    const a = poopAlert(lastC, ageDays(family?.birth, lastC.ts));
     if (a) add('poop-color', a.level, a.text);
   }
-  // 체온
-  const lastTemp = [...lv].reverse().find((e) => e.type === 'temp' && isNum(e.data?.c));
-  if (lastTemp && now - lastTemp.ts <= 24 * HOUR && lastTemp.data.c >= NORMS.feverC) {
-    if (age != null && age < NORMS.feverUrgentUnderDays) add('fever', 'urgent', HINT_COPY.feverInfant, '../fever/');
-    else add('fever', 'info', HINT_COPY.fever, '../fever/');
-  }
+  // 체온 (24시간 안 전부 — 3개월 미만 발열은 한 번이라도 있으면)
+  const temps = lv.filter((e) => e.type === 'temp' && isNum(e.data?.c) && now - e.ts <= 24 * HOUR);
+  const infantFever = [...temps].reverse().find((e) => e.data.c >= NORMS.feverC
+    && (() => { const a = ageDays(family?.birth, e.ts); return a != null && a < NORMS.feverUrgentUnderDays; })());
+  const lastTemp = temps[temps.length - 1];
+  if (infantFever) add('fever', 'urgent', `${fmtTime(infantFever.ts)} ${infantFever.data.c.toFixed(1)}℃ — ${HINT_COPY.feverInfant}`, '../fever/');
+  else if (lastTemp && lastTemp.data.c >= NORMS.feverC) add('fever', 'info', HINT_COPY.fever, '../fever/');
   // 수유 공백
   const fs = feedState(events, now, stage, age);
   if (fs.wakeHint) add('wake-feed', 'check', HINT_COPY.wakeFeed);
@@ -864,13 +886,15 @@ export function describe(event) {
 
 // ---------- 교대 요약 ----------
 // 카카오톡에 붙여 넣는 평문. 가장 중요한 줄(지금 상태)이 먼저, 15줄 이내, 오전/오후, 사람별 횟수 없음 (RESEARCH B)
-function feedPlain(e) {
+// burp: 수유 기록에 트림 값이 없을 때 쓸 값 (그 뒤 따로 누른 트림 기록이 있으면 'yes')
+function feedPlain(e, burp = null) {
   const d = e.data || {};
   const label = typeMeta(e.type).label;
   let s;
   if (e.type === 'breast') s = `${label} ${labelOf(BREAST_SIDES, d.side) || '양쪽'}${isNum(d.min) ? ` ${d.min}분` : ''}`;
   else s = `${label}${isNum(d.ml) ? ` ${d.ml}ml` : ''}`;
-  return burpPlain(d.burp) ? `${s} · ${burpPlain(d.burp)}` : s;
+  const b = burpPlain(d.burp ?? burp);
+  return b ? `${s} · ${b}` : s;
 }
 
 function diaperPlain(e, all) {
@@ -908,6 +932,9 @@ export function handoffText({ family = {}, members = [], events = [], from, to, 
   const fs = feedState(events, now, st, age);
   const sl = sleepState(events, now);
   const lastFeed = fs.last && now - fs.last.ts <= DAY ? fs.last : null;
+  // 트림 버튼(따로 남긴 트림 기록)으로 기록했어도 마지막 수유의 '트림 O' 로 (feedState.burpPending 과 같은 창)
+  const lastFeedBurp = lastFeed && lastFeed.data?.burp == null
+    && lvAll.some((e) => e.type === 'burp' && e.ts >= lastFeed.ts && e.ts <= lastFeed.ts + NORMS.burpWindowMin * MIN) ? 'yes' : null;
   const nextTxt = (fmt) => {
     if (!fs.nextAt) return null;
     return fs.nextAt <= now ? '지금쯤' : `${fmt(roundTo5(fs.nextAt))}쯤`;
@@ -916,7 +943,9 @@ export function handoffText({ family = {}, members = [], events = [], from, to, 
   const mtText = (fmt) => medsTemps.slice(-4).map((e) => (e.type === 'temp'
     ? `${fmt(e.ts)} ${e.data.c.toFixed(1)}℃`
     : `${fmt(e.ts)} ${e.data?.name || '약'}`)).join(' · ');
-  const notes = inRange.filter((e) => e.type === 'note' && e.data?.text).map((e) => e.data.text);
+  // 특이사항: 메모 기록 + 다른 기록에 붙인 메모 ('오전 11:00 분유: 먹고 조금 토했어요')
+  const notes = inRange.filter((e) => (e.type === 'note' && e.data?.text) || (e.type !== 'note' && e.type !== 'med' && e.data?.note))
+    .map((e) => (e.type === 'note' ? e.data.text : `${fmtTime(e.ts)} ${typeMeta(e.type).label}: ${e.data.note}`));
   const noteText = notes.length ? cut(notes.join(' / '), 120) : '';
   const diapers = lvAll.filter((e) => isPee(e) || isPoop(e) || e.type === 'potty');
 
@@ -925,7 +954,7 @@ export function handoffText({ family = {}, members = [], events = [], from, to, 
     const h = new Date(now).getHours();
     const label = h < 6 ? '새벽' : h >= 21 ? '밤' : name;
     const parts = [];
-    if (lastFeed) parts.push(`마지막 수유 ${fmtHM(lastFeed.ts)} · ${feedPlain(lastFeed)}`);
+    if (lastFeed) parts.push(`마지막 수유 ${fmtHM(lastFeed.ts)} · ${feedPlain(lastFeed, lastFeedBurp)}`);
     const lastD = diapers.filter((e) => now - e.ts <= DAY).pop();
     if (lastD) parts.push(`기저귀 ${fmtHM(lastD.ts)} ${diaperPlain(lastD, lvAll)}`);
     if (sl.ongoing) parts.push(`지금 자는 중 (${fmtElapsed(sl.elapsedMin)}째)`);
@@ -954,7 +983,7 @@ export function handoffText({ family = {}, members = [], events = [], from, to, 
   }
   // 2) 다음 수유
   if (lastFeed) {
-    const lastTxt = `마지막 ${fmtTime(lastFeed.ts)} · ${feedPlain(lastFeed)}`;
+    const lastTxt = `마지막 ${fmtTime(lastFeed.ts)} · ${feedPlain(lastFeed, lastFeedBurp)}`;
     const nx = nextTxt(fmtTime);
     lines.push(nx ? `다음 수유 예상: ${nx} (${lastTxt})` : `마지막 수유: ${lastTxt.replace(/^마지막 /, '')}`);
   }
@@ -993,7 +1022,7 @@ export function handoffText({ family = {}, members = [], events = [], from, to, 
     lines.push('기저귀: 기록 없음');
   }
   const worst = inRange.filter((e) => e.type === 'poop')
-    .map((e) => ({ e, a: poopAlert(e, age) }))
+    .map((e) => ({ e, a: poopAlert(e, ageDays(family?.birth, e.ts)) }))   // 그 변을 본 날의 나이로 (태변)
     .filter((x) => x.a && x.a.level !== 'info')
     .sort((x, y) => LEVEL_RANK[x.a.level] - LEVEL_RANK[y.a.level])[0];
   if (worst) lines.push(`⚠ 대변 색 확인 필요: ${fmtTime(worst.e.ts)} ${labelOf(POOP_COLORS, worst.e.data.color)}`);

@@ -176,9 +176,25 @@ function makeServer({ pageLimit = 1000, stringNums = false } = {}) {
         if (!d) return err(401, 'unauthorized');
         const f = S.fams.get(d.fam);
         if (!f.members.get(d.member).isAdmin) return err(403, 'forbidden');
-        if (b.a === 'remove') { for (const dv of S.devices.values()) if (dv.member === b.memberId) dv.revoked = true; f.members.get(b.memberId).revoked = true; }
-        else f.members.get(b.memberId).isAdmin = !!b.on;
+        if (b.a === 'remove') {
+          for (const dv of S.devices.values()) if (dv.member === b.memberId) dv.revoked = true;
+          f.members.get(b.memberId).revoked = true;
+          return reply(200, { ok: true, members: membersView(f), invite: newInvite(f) });   // 초대 코드도 바뀜
+        }
+        f.members.get(b.memberId).isAdmin = !!b.on;
         return reply(200, { ok: true, members: membersView(f) });
+      }
+      case 'quickkey': {
+        const d = auth(b.k);
+        if (!d) return err(401, 'unauthorized');
+        d.quick = `qk-${++n}`;
+        return reply(200, { ok: true, quick: d.quick });
+      }
+      case 'signout': {
+        const d = auth(b.k);
+        if (!d) return err(401, 'unauthorized');
+        for (const dv of S.devices.values()) if (dv !== d && dv.fam === d.fam && dv.member === d.member) dv.revoked = true;
+        return reply(200, { ok: true, members: membersView(S.fams.get(d.fam)) });
       }
       case 'leave': {
         const d = auth(b.k);
@@ -458,8 +474,11 @@ test('inviteLink · quickUrl', () => {
   const s = setupShared();
   assert.equal(Sy.quickUrl(s, 'pee'), '', '공유 전에는 없음');
   s.sync.token = 'tok_A-b';
-  assert.equal(Sy.quickUrl(s, 'pee'), `${DEV}?a=q&k=tok_A-b&t=pee`);
-  assert.equal(Sy.quickUrl(s, 'formula', { ml: 120, side: undefined }), `${DEV}?a=q&k=tok_A-b&t=formula&ml=120`);
+  assert.equal(Sy.quickUrl(s, 'pee'), '', '기록 전용 키가 없으면 없음 — 기기 토큰은 절대 주소에 넣지 않는다');
+  s.sync.quickKey = 'qk_Z-9';
+  assert.equal(Sy.quickUrl(s, 'pee'), `${DEV}?a=q&k=qk_Z-9&t=pee`);
+  assert.equal(Sy.quickUrl(s, 'formula', { ml: 120, side: undefined }), `${DEV}?a=q&k=qk_Z-9&t=formula&ml=120`);
+  assert.ok(!Sy.quickUrl(s, 'pee').includes('tok_A-b'));
   s.sync.revoked = true;
   assert.equal(Sy.quickUrl(s, 'pee'), '');
 });
@@ -791,8 +810,11 @@ test('rotateInvite · setAdmin · removeMember · leaveFamily', async () => {
   await Sy.syncNow(A, at(9, 2));
   await Sy.setAdmin(A, B.meId, true);
   assert.equal(St.memberById(A, B.meId).isAdmin, true);
+  const inviteBefore = A.sync.invite;
   await Sy.removeMember(A, B.meId);
   assert.equal(St.memberById(A, B.meId).revoked, true);
+  assert.ok(A.sync.invite && A.sync.invite !== inviteBefore, '내보내면 초대 링크도 새로');
+  await assert.rejects(Sy.peekInvite(inviteBefore), (e) => e.code === 'invite_invalid');
   await assert.rejects(Sy.syncNow(B, at(9, 3)), (e) => e.status === 401);
   assert.equal(B.sync.revoked, true);
   // 공유 끊기: 남은 기록을 먼저 올리고, 기기 기록은 유지
@@ -963,7 +985,16 @@ test('writeSwConfig · drainInbox(한 건씩 + 배열 호환, id 중복 제거, 
   assert.equal(await Sy.writeSwConfig(s), true);
   const cache = await caches.open(Sy.SW_DATA_CACHE);
   const cfg = await (await cache.match('http://localhost:5190/baby-log/__bl/config')).json();
-  assert.deepEqual(cfg, { v: 1, endpoint: DEV, token: 'tok-9', meId: s.meId, meName: '엄마', meEmoji: '👩', quickActions: ['pee', 'poop'], lastMl: { formula: 130 }, babyName: '하린' });
+  assert.deepEqual(cfg, { v: 1, endpoint: DEV, token: 'tok-9', meId: s.meId, selfId: s.meId, meName: '엄마', meEmoji: '👩', quickActions: ['pee', 'poop'], lastMl: { formula: 130 }, babyName: '하린' });
+  // 이 기기에서 고른 양이 없으면 가족의 마지막 기록 양 (다른 가족이 160 을 기록 → 알림 버튼도 160)
+  const s2 = setupShared();
+  s2.events.push({ id: 'srv-1', type: 'formula', ts: at(7), by: null, data: { ml: 160 }, deleted: false, updatedAt: at(7), rev: 3, dirty: false });
+  assert.deepEqual(Sy.swConfig(s2).lastMl, { formula: 160 });
+  // 수신함 기록의 '누가' = 이 기기 주인 (구성원 전환과 무관 — 온라인이면 서버가 토큰의 사람으로 기록하므로)
+  const gma = St.upsertMember(s2, { role: 'grandma' }, at(8));
+  St.setMe(s2, gma.id);
+  assert.equal(Sy.swConfig(s2).selfId, s2.selfId);
+  assert.notEqual(Sy.swConfig(s2).selfId, gma.id);
   s.sync.revoked = true;
   await Sy.writeSwConfig(s);
   assert.equal((await (await cache.match('http://localhost:5190/baby-log/__bl/config')).json()).token, null, '끊기면 토큰 안 줌');
@@ -1076,4 +1107,178 @@ test('startAutoSync: kick 디바운스 → 동기화·저장·onChange, 가려�
     delete globalThis.document;
     delete globalThis.window;
   }
+});
+
+// =====================================================================
+// 리뷰 수정분: 기기 주인(ownerId) · 같은 가족 다시 참여 · 기록 전용 키 · updatedAt 잘림
+// =====================================================================
+const byCount = (list) => list.filter((e) => !e.deleted).reduce((m, e) => { m[e.by] = (m[e.by] || 0) + 1; return m; }, {});
+
+test('다시 참여(같은 가족): 구성원 전환(할머니)으로 남긴 기록이 새 사람에게 옮겨지지 않는다 — 합치기/버리기 모두', async () => {
+  browserEnv();
+  const server = makeServer();
+  globalThis.fetch = server.fetch;
+  const A = setupShared();
+  const gma = St.upsertMember(A, { role: 'grandma', name: '할머니' }, at(8));
+  const dadOnA = St.upsertMember(A, { role: 'dad', name: '아빠' }, at(8));
+  St.setMe(A, gma.id);
+  for (let i = 0; i < 3; i++) St.addEvent(A, { type: 'pee' }, at(8, 10 + i));   // 엄마 폰에서 할머니 이름으로 3건
+  St.setMe(A, A.selfId);
+  await Sy.createFamily(A, at(9));
+  assert.equal(A.sync.memberId, A.selfId, '기기는 엄마');
+  // 아빠 폰: 아빠로 참여 → 전환을 할머니로 두고 1건
+  const B = St.defaultState();
+  await Sy.joinFamily(B, A.sync.invite, { claim: dadOnA.id }, at(9, 1));
+  St.setMe(B, gma.id);
+  St.addEvent(B, { type: 'formula', data: { ml: 100 } }, at(9, 2));
+  await Sy.syncNow(B, at(9, 3));
+  const fid = A.sync.familyId;
+  assert.deepEqual(byCount(peekEvents(server, fid)), { [gma.id]: 4 });
+  // 관리자가 아빠 폰 연결 해제 → 아빠가 자기 자리로 다시 참여 (버리고 참여)
+  await Sy.unlinkMember(A, dadOnA.id);
+  await assert.rejects(Sy.syncNow(B, at(9, 4)), (e) => e.status === 401);
+  assert.equal(B.sync.revoked, true);
+  assert.equal(St.ownerId(B), dadOnA.id, '끊겨도 기기 주인은 아빠 (전환은 할머니)');
+  St.addEvent(B, { type: 'pee' }, at(9, 5));   // 끊긴 사이 (전환이 할머니라 by=할머니)
+  await Sy.joinFamily(B, A.sync.invite, { claim: dadOnA.id, merge: false }, at(9, 6));
+  assert.deepEqual(byCount(peekEvents(server, fid)), { [gma.id]: 5 }, '서버의 할머니 기록 그대로 + 끊긴 사이 기록도 올라감');
+  assert.deepEqual(byCount(B.events), { [gma.id]: 5 });
+  await Sy.syncNow(A, at(9, 7));
+  assert.deepEqual(byCount(A.events), { [gma.id]: 5 }, '다른 기기에서도 그대로');
+});
+
+test('물려받은 폰(공유 끊기 → 다른 사람으로 같은 가족에 참여 + 합치기): 옛 주인의 서버 기록은 그대로, 끊긴 뒤 새로 남긴 것만 새 사람으로', async () => {
+  browserEnv();
+  const server = makeServer();
+  globalThis.fetch = server.fetch;
+  const A = setupShared();
+  const mom = A.selfId;
+  const gma = St.upsertMember(A, { role: 'grandma', name: '할머니' }, at(8));
+  for (let i = 0; i < 5; i++) St.addEvent(A, { type: 'pee' }, at(8, 10 + i));
+  await Sy.createFamily(A, at(9));
+  const fid = A.sync.familyId;
+  const invite = A.sync.invite;
+  await Sy.leaveFamily(A);
+  assert.equal(A.selfFamilyId, fid, '끊어도 어느 가족이었는지 기억');
+  const after = St.addEvent(A, { type: 'formula', data: { ml: 90 } }, at(9, 30));   // 끊긴 뒤 이 폰에서 새로
+  await Sy.joinFamily(A, invite, { claim: gma.id, merge: true }, at(10));
+  assert.deepEqual(byCount(peekEvents(server, fid)), { [mom]: 5, [gma.id]: 1 });
+  assert.equal(after.by, gma.id);
+  assert.equal(A.meId, gma.id);
+  assert.equal(A.selfId, gma.id);
+});
+
+test('공유 끊은 뒤 같은 가족에 "새 사람"으로 참여: 옛 내 자리(빈 자리)를 몰래 차지하지 않고 새 구성원으로', async () => {
+  browserEnv();
+  const server = makeServer();
+  globalThis.fetch = server.fetch;
+  const A = setupShared();
+  const mom = A.selfId;
+  const gma = St.upsertMember(A, { role: 'grandma', name: '할머니' }, at(8));
+  St.addEvent(A, { type: 'pee' }, at(8, 30));
+  await Sy.createFamily(A, at(9));
+  const invite = A.sync.invite;
+  await Sy.leaveFamily(A);
+  St.setMe(A, gma.id);   // 전환을 할머니로 둔 채
+  await Sy.joinFamily(A, invite, { me: { role: 'dad', name: '새아빠' }, merge: true }, at(10));
+  const joined = server.calls.filter((c) => c.body.a === 'join').pop().body;
+  assert.ok(joined.me.id !== mom && joined.me.id !== gma.id, '옛 id 를 다시 쓰지 않음');
+  assert.equal(St.me(A).name, '새아빠');
+  assert.equal(A.sync.memberId, joined.me.id);
+  assert.deepEqual(byCount(peekEvents(server, A.sync.familyId)), { [mom]: 1 });
+});
+
+test('가족 공유 켜기: 구성원 전환을 할머니로 둔 채 켜도 이 기기(와 관리자)는 기기 주인', async () => {
+  browserEnv();
+  const server = makeServer();
+  globalThis.fetch = server.fetch;
+  const A = setupShared();
+  const mom = A.selfId;
+  const gma = St.upsertMember(A, { role: 'grandma' }, at(8));
+  St.setMe(A, gma.id);
+  await Sy.createFamily(A, at(9));
+  assert.equal(server.calls[0].body.meId, mom);
+  assert.equal(A.sync.memberId, mom);
+  assert.equal(A.meId, gma.id, '전환은 그대로');
+  assert.equal(St.ownerId(A), mom);
+});
+
+test('joinFamily: nonce·me.id 를 그대로 보내 다시 시도해도 같은 참여 (응답 유실)', async () => {
+  browserEnv();
+  const server = makeServer();
+  globalThis.fetch = server.fetch;
+  const A = setupShared();
+  await Sy.createFamily(A, at(9));
+  const nonce = Sy.makeJoinNonce();
+  assert.match(nonce, /^[A-Za-z0-9_-]{32}$/);
+  assert.notEqual(Sy.makeJoinNonce(), nonce);
+  const meId = '44444444-4444-4444-8444-444444444444';
+  let first = true;
+  server.hook = async (body, handle) => {
+    if (body.a === 'join' && first) { first = false; await handle(body); throw new TypeError('network'); }   // 서버엔 들어갔는데 응답이 끊김
+  };
+  const B = St.defaultState();
+  await assert.rejects(Sy.joinFamily(B, A.sync.invite, { me: { id: meId, role: 'sitter', name: '이모님' }, nonce }, at(9, 1)), (e) => e.code === 'network');
+  await Sy.joinFamily(B, A.sync.invite, { me: { id: meId, role: 'sitter', name: '이모님' }, nonce }, at(9, 2));
+  const joins = server.calls.filter((c) => c.body.a === 'join').map((c) => c.body);
+  assert.equal(joins.length, 2);
+  assert.ok(joins.every((j) => j.nonce === nonce && j.me.id === meId));
+  assert.equal(B.meId, meId);
+});
+
+test('mergeServer · applyServerMeta: 서버가 미래 updatedAt 을 잘라 돌려주면 그 서버본을 받아들인다 (끝없이 다시 보내지 않음)', async () => {
+  browserEnv();
+  const s = setupShared();
+  const now = at(9);
+  const far = now + 365 * DAY;
+  const e = St.addEvent(s, { type: 'pee' }, far);   // 시계가 1년 빠른 기기
+  const serverTime = now;
+  const clamped = serverTime + Sy.UPDATED_AT_FUTURE_MS;
+  const r = Sy.mergeServer(s, [{ ...Sy.toWireEvent(e), updatedAt: clamped, rev: 7 }], serverTime);
+  assert.equal(r.confirmed, 1);
+  assert.equal(e.dirty, false);
+  assert.equal(e.updatedAt, clamped);
+  // serverTime 없이(옛 방식)면 로컬 유지
+  const e2 = St.addEvent(s, { type: 'pee' }, far);
+  Sy.mergeServer(s, [{ ...Sy.toWireEvent(e2), updatedAt: clamped, rev: 8 }]);
+  assert.equal(e2.dirty, true);
+  // 로컬이 정말 더 새로우면(서버본이 잘린 값보다 작음) 여전히 로컬 유지
+  const e3 = St.addEvent(s, { type: 'pee' }, far);
+  Sy.mergeServer(s, [{ ...Sy.toWireEvent(e3), updatedAt: now - MIN, rev: 9 }], serverTime);
+  assert.equal(e3.dirty, true);
+  // 구성원·가족도 같게
+  const m = St.me(s);
+  St.upsertMember(s, { id: m.id, name: '엄마2' }, far);
+  St.updateFamily(s, { name: '하린2' }, far);
+  Sy.applyServerMeta(s, { serverTime, members: [{ ...Sy.toWireMember(m), updatedAt: clamped }], family: { name: '하린2', birth: s.family.birth, updatedAt: clamped } });
+  assert.equal(m.dirty, false);
+  assert.equal(s.family.dirty, false);
+});
+
+test('ensureQuickKey: 기록 전용 키를 받아 잠금화면 주소에 넣고, 새로 만들면 바뀐다 · signOutOtherDevices', async () => {
+  browserEnv();
+  const server = makeServer();
+  globalThis.fetch = server.fetch;
+  const A = setupShared();
+  assert.equal(Sy.quickUrl(A, 'pee'), '');
+  await Sy.createFamily(A, at(9));
+  assert.equal(Sy.quickUrl(A, 'pee'), '', '키 받기 전');
+  const k1 = await Sy.ensureQuickKey(A);
+  assert.equal(await Sy.ensureQuickKey(A), k1, '있으면 다시 안 받음');
+  assert.equal(Sy.quickUrl(A, 'pee'), `${DEV}?a=q&k=${k1}&t=pee`);
+  assert.ok(!Sy.quickUrl(A, 'pee').includes(A.sync.token));
+  const k2 = await Sy.ensureQuickKey(A, { rotate: true });
+  assert.notEqual(k2, k1);
+  assert.equal(A.sync.quickKey, k2);
+  // 내 다른 기기 모두 끊기
+  const dl = await Sy.createDeviceLink(A);
+  const A2 = St.defaultState();
+  await Sy.joinFamily(A2, dl.link, {}, at(9, 1));
+  await Sy.signOutOtherDevices(A);
+  await assert.rejects(Sy.syncNow(A2, at(9, 2)), (e) => e.status === 401);
+  await Sy.syncNow(A, at(9, 2));
+  // 공유를 끊으면 키도 사라짐
+  await Sy.leaveFamily(A);
+  assert.equal(A.sync.quickKey, null);
+  assert.equal(Sy.quickUrl(A, 'pee'), '');
 });

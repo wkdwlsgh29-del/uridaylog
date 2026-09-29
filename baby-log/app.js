@@ -19,7 +19,7 @@ import {
   stageFor, gridFor, visibleActions, live, statsBetween, feedState, diaperState, sleepState,
   quests, streakDays, earnedBadges, newBadges, team, hints, handoffText, toCSV, describe, fmtTime, fmtHM,
   fmtElapsed, fmtDur, fmtDate, fmtNum, typeMeta, memberName, memberEmoji, memberColor, lastMl, amountChips,
-  startOfDay, addDaysTs, dayKey, poopAlert,
+  startOfDay, addDaysTs, dayKey, poopAlert, ageDays, uuid,
 } from './logic.js';
 import {
   KEY, load, save, wipe, setupFamily, updateFamily, upsertMember, me, memberById, setMe, eventById, addEvent,
@@ -28,7 +28,7 @@ import {
 import {
   canShare, createFamily, peekInvite, joinFamily, rotateInvite, removeMember, setAdmin, unlinkMember,
   createDeviceLink, leaveFamily, inviteLink, parseJoin, quickUrl, swConfig, writeSwConfig, clearSwData,
-  startAutoSync, ERROR_COPY,
+  startAutoSync, ERROR_COPY, ensureQuickKey, signOutOtherDevices, makeJoinNonce,
 } from './sync.js';
 
 const MIN = 60000;
@@ -55,6 +55,8 @@ let autosync = null;
 const ui = {
   tab: 'today', extraDays: 0, lastDay: '', lastNowSig: '', installPrompt: null, swReg: null,
   undoTimer: null, undo: null, tapAt: {},
+  // 인앱 브라우저 안내: 처음 한 번은 크게, 그다음(또는 ✕)부터는 한 줄로 — 퀵 그리드가 첫 화면 밖으로 밀리지 않게
+  inappCompact: (() => { try { return localStorage.getItem('bl:inappSeen') === '1'; } catch (e) { return false; } })(),
 };
 
 function isSetUp() {
@@ -84,6 +86,13 @@ function subj(name) {
   const code = w.charCodeAt(w.length - 1);
   if (code >= 0xac00 && code <= 0xd7a3 && (code - 0xac00) % 28) return `${w}이`;
   return `${w}가`;
+}
+// 을/를 (김OO 선생님을, 엄마를) — '님'을 덧붙이지 않는다 (이름에 이미 '선생님'·'할머니'가 들어 있음)
+function eul(name) {
+  const w = String(name || '');
+  const code = w.charCodeAt(w.length - 1);
+  if (code >= 0xac00 && code <= 0xd7a3 && (code - 0xac00) % 28) return `${w}을`;
+  return `${w}를`;
 }
 // (으)로
 function euro(name) {
@@ -285,6 +294,8 @@ function render() {
 
 function renderBanners() {
   $('inappBanner').classList.toggle('hidden', !isInApp);
+  $('inappBanner').classList.toggle('compact', ui.inappCompact);
+  if (isInApp && !ui.inappCompact) { try { localStorage.setItem('bl:inappSeen', '1'); } catch (e) { /* ignore */ } }
   $('revokedBanner').classList.toggle('hidden', !state.sync.revoked);
 }
 
@@ -299,11 +310,13 @@ function syncView() {
 
 function renderTop() {
   const m = me(state);
-  setHTML($('meChip'), `<span>나 · ${esc(memberEmoji(m))} ${esc(memberName(m))}</span><span class="caret">▾</span>`);
+  // 긴 이름은 이름 칸만 '…'로 줄이고 '나 ·'와 ▾(바꾸기 표시)는 늘 보이게
+  setHTML($('meChip'), `<span class="mc-pre">나 ·</span><span class="mc-name">${esc(memberEmoji(m))} ${esc(memberName(m))}</span><span class="caret" aria-hidden="true">▾</span>`);
   $('meChip').setAttribute('aria-label', `지금 기록하는 사람: ${memberName(m)} (바꾸기)`);
   const [cls, text] = syncView();
   $('syncPill').className = `sync-pill ${cls}`;
   $('syncText').textContent = text;
+  $('syncPill').setAttribute('aria-label', `공유 상태: ${text}`);
 }
 
 function renderBaby(c) {
@@ -343,12 +356,12 @@ function renderBaton(c) {
   const e = list[list.length - 1];
   if (!e) { setHTML($('batonBanner'), ''); return; }
   const who = memberName(mem(e.by));
-  const range = e.data?.from && e.data?.to ? `${fmtHM(e.data.from)}~${fmtHM(e.data.to)} 요약` : '교대 요약';
+  // 한 줄에 12시·24시 표기를 섞지 않고 짧게 — 범위는 요약을 열면 보인다
   setHTML($('batonBanner'), `
     <div class="baton">
       <button class="baton-main" data-baton-view="${esc(e.id)}">
         <span class="baton-title">📋 ${esc(subj(who))} 바통을 넘겼어요</span>
-        <span class="baton-sub">${esc(fmtTime(e.ts))} · ${esc(range)} 보기 ›</span>
+        <span class="baton-sub">${esc(fmtTime(e.ts))} · 요약 보기 ›</span>
       </button>
       <button class="baton-ack" data-ack="${esc(e.id)}">✅ 받았어요</button>
     </div>`);
@@ -501,8 +514,9 @@ function cellHTML(id, c, ss, lastMap, cls = 'qbtn') {
     default:
       sub = ago(lastMap[id]);
   }
-  return `<button class="${cls}${on ? ' on' : ''}" data-act="${esc(id)}" aria-label="${esc(label)}${meta.input === 'tap' ? ' 바로 기록' : ''}">
-    <span class="q-emo">${emo}</span><span class="q-label">${esc(label)}</span><span class="q-sub">${sub}</span></button>`;
+  // 접근성 이름 = 보이는 글자(지난번 양·경과·자는 시간이 30초마다 바뀌어도 그대로 읽힘) + '바로 기록' 안내
+  return `<button class="${cls}${on ? ' on' : ''}" data-act="${esc(id)}">
+    <span class="q-emo" aria-hidden="true">${emo}</span><span class="q-label">${esc(label)}</span><span class="q-sub">${sub}</span>${meta.input === 'tap' ? '<span class="sr-only">바로 기록</span>' : ''}</button>`;
 }
 
 function renderGrid(c) {
@@ -925,8 +939,14 @@ function logFromSheet(type, ts, data) {
 // ============================================================
 // 바텀 시트 (하나를 돌려 씀) + 안드로이드 뒤로가기로 닫기
 // ============================================================
-const sheet = { open: false, pushed: false, onClose: null };
+const sheet = { open: false, pushed: false, onClose: null, returnFocus: null };
 let popIgnore = 0;
+
+// 시트 안에서 Tab 으로 갈 수 있는 것들
+function sheetFocusables() {
+  return [...$('sheet').querySelectorAll('button, [href], input, textarea, select, [tabindex]:not([tabindex="-1"])')]
+    .filter((x) => !x.disabled && !x.closest('.hidden') && x.getClientRects().length);
+}
 
 function openSheet(title, html, { onClick = null, onInput = null, onChange = null, onClose = null, onMount = null, history: useHistory = true } = {}) {
   hideUndo();
@@ -939,6 +959,8 @@ function openSheet(title, html, { onClick = null, onInput = null, onChange = nul
   sheet.onClose = onClose;
   if (!sheet.open) {
     sheet.open = true;
+    // 닫을 때 원래 누른 버튼으로 포커스를 돌려준다 (스크린리더·키보드)
+    sheet.returnFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
     $('sheetDim').classList.remove('hidden');
     document.documentElement.style.overflow = 'hidden';
     sheet.pushed = false;
@@ -946,6 +968,8 @@ function openSheet(title, html, { onClick = null, onInput = null, onChange = nul
   }
   body.scrollTop = 0;
   onMount?.(body);
+  // aria-modal 시트: 포커스를 시트 안으로 (뒤 화면 버튼을 헤매지 않게)
+  if (sheet.open && !$('sheet').contains(document.activeElement)) $('sheetClose').focus({ preventScroll: true });
 }
 
 function hideSheet() {
@@ -958,6 +982,9 @@ function hideSheet() {
   body.onclick = body.oninput = body.onchange = null;
   const cb = sheet.onClose;
   sheet.onClose = null;
+  const rf = sheet.returnFocus;
+  sheet.returnFocus = null;
+  if (rf && rf.isConnected && $('modalDim').classList.contains('hidden')) { try { rf.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
   cb?.();
 }
 
@@ -1134,7 +1161,7 @@ function openFoodSheet(type) {
     <div class="sec"><div class="sec-title">무엇을 <span class="sub">(선택)</span></div>
       <input class="field" id="foodInput" list="foodList" maxlength="${LIMITS.food}" placeholder="${type === 'solid' ? '예: 소고기 애호박 미음' : '예: 김밥, 바나나'}" autocomplete="off" />
       <datalist id="foodList">${foods.map((x) => `<option value="${esc(x)}"></option>`).join('')}</datalist>
-      ${foods.length ? `<div class="opts" style="margin-top:8px">${foods.slice(0, 6).map((x) => `<button type="button" class="opt" data-food="${esc(x)}" style="min-height:40px;font-size:13.5px">${esc(x)}</button>`).join('')}</div>` : ''}
+      ${foods.length ? `<div class="opts" style="margin-top:8px">${foods.slice(0, 6).map((x) => `<button type="button" class="opt" data-food="${esc(x)}" style="font-size:13.5px">${esc(x)}</button>`).join('')}</div>` : ''}
     </div>
     <div class="sec"><div class="sec-title">얼마나</div>${optsHTML('amount', FOOD_AMOUNTS, f.amount, { cls: 'opts cols-4', toggle: true })}</div>
     <div class="sec"><div class="sec-title">반응</div>${optsHTML('reaction', FOOD_REACTIONS.map((r) => ({ id: r.id, label: `${r.emoji} ${r.label}` })), f.reaction, { cls: 'opts cols-2', toggle: true })}</div>
@@ -1219,7 +1246,7 @@ function openMedSheet() {
     <div class="sec"><div class="sec-title">약 이름 <span class="sub">(선택)</span></div>
       <input class="field" id="medName" list="medList" maxlength="${LIMITS.medName}" placeholder="예: 해열제(챔프) 5ml" autocomplete="off" />
       <datalist id="medList">${names.map((x) => `<option value="${esc(x)}"></option>`).join('')}</datalist>
-      ${names.length ? `<div class="opts" style="margin-top:8px">${names.slice(0, 5).map((x) => `<button type="button" class="opt" data-med="${esc(x)}" style="min-height:40px;font-size:13.5px">${esc(x)}</button>`).join('')}</div>` : ''}
+      ${names.length ? `<div class="opts" style="margin-top:8px">${names.slice(0, 5).map((x) => `<button type="button" class="opt" data-med="${esc(x)}" style="font-size:13.5px">${esc(x)}</button>`).join('')}</div>` : ''}
     </div>
     <div class="sec"><div class="sec-title">메모 <span class="sub">(선택)</span></div>
       <input class="field" id="medNote" maxlength="${LIMITS.medNote}" placeholder="예: 열 38.4℃라서" autocomplete="off" /></div>
@@ -1409,7 +1436,8 @@ function openEditSheet(ids) {
   const poopNote = () => {
     const box = $('poopNote');
     if (!box) return;
-    const a = f.color ? poopAlert({ type: 'poop', data: { color: f.color } }, c.age) : null;
+    // 나이는 그 변을 본 날 기준 (생후 3일 태변을 다음 날 고칠 때 '진료' 경고가 뜨지 않게)
+    const a = f.color ? poopAlert({ type: 'poop', data: { color: f.color } }, ageDays(state.family.birth, e.ts)) : null;
     box.innerHTML = a ? `<p class="sheet-note ${a.level === 'urgent' ? 'danger' : a.level === 'check' ? 'warn' : ''}">${esc(a.text)}</p>` : '';
   };
   openSheet(`${meta.emoji} ${isBoth ? '소변+대변' : meta.label} 고치기`, html, {
@@ -1635,7 +1663,11 @@ function openStageSheet() {
   const game = state.prefs.game;
   const items = STAGES.map((s, i) => {
     const cls = i < c.st.index ? 'past' : i === c.st.index ? 'cur' : 'lock';
-    const unl = s.unlocks.length ? `새 버튼: ${s.unlocks.map((id) => `${typeMeta(id).emoji} ${typeMeta(id).label}`).join(' · ')}` : '';
+    // 단계 안에서 늦게 열리는 버튼(예: 뒤집기 단계의 이유식은 120일부터)은 그 날짜를 따로 적는다
+    const unl = s.unlocks.length ? `새 버튼: ${s.unlocks.map((id) => {
+      const from = EVENT_TYPES[id]?.fromDay;
+      return `${typeMeta(id).emoji} ${typeMeta(id).label}${from != null && from > s.fromDay ? `(생후 ${from}일부터)` : ''}`;
+    }).join(' · ')}` : '';
     const when = s.fromDay === 0 ? '태어나서부터' : `생후 ${s.fromDay}일부터`;
     return `<li class="rm ${cls}">
       <span class="rm-emo">${i > c.st.index ? '🔒' : s.emoji}</span>
@@ -1716,7 +1748,7 @@ function pumpModal() {
   const el = $('modal');
   const kinds = { primary: 'btn-primary', ghost: 'btn-ghost', danger: 'btn-danger' };
   el.innerHTML = `${opts.top || ''}${opts.emoji ? `<div class="m-emoji">${opts.emoji}</div>` : ''}
-    <h3>${esc(opts.title || '')}</h3>${opts.body ? `<p>${esc(opts.body)}</p>` : ''}${opts.html || ''}
+    <h3 id="modalTitle">${esc(opts.title || '')}</h3>${opts.body ? `<p>${esc(opts.body)}</p>` : ''}${opts.html || ''}
     <div class="m-btns">${(opts.buttons || []).map((b, i) => `<button class="btn ${kinds[b.kind] || 'btn-ghost'}" data-i="${i}">${esc(b.label)}</button>`).join('')}</div>`;
   $('modalDim').classList.remove('hidden');
   const done = (v) => {
@@ -1847,14 +1879,15 @@ function openMemberSheet(id) {
       if (ad) { await busy(ad, () => setAdmin(state, m.id, ad.dataset.admin === '1'), ad.dataset.admin === '1' ? '관리자로 지정했어요' : '관리자를 해제했어요'); return; }
       const ul = e.target.closest('[data-unlink]');
       if (ul) {
-        const ok = await ask({ emoji: '📵', title: `${memberName(m)}의 기기 연결을 끊을까요?`, body: '가족에서 내보내지는 않아요. 새 폰에서 초대 링크로 다시 이 사람을 고르면 돼요.', buttons: [{ label: '끊기', value: true, kind: 'danger' }, { label: '취소', value: false }], dismiss: false });
-        if (ok) await busy(ul, () => unlinkMember(state, m.id), '기기 연결을 끊었어요');
+        const adminNote = m.isAdmin ? ' 관리자 권한도 함께 해제돼요 — 다시 연결하면 관리자로 다시 지정해 주세요.' : '';
+        const ok = await ask({ emoji: '📵', title: `${memberName(m)}의 기기 연결을 끊을까요?`, body: `가족에서 내보내지는 않아요. 새 폰에서 초대 링크로 다시 이 사람을 고르면 돼요.${adminNote}`, buttons: [{ label: '끊기', value: true, kind: 'danger' }, { label: '취소', value: false }], dismiss: false });
+        if (ok) await busy(ul, () => unlinkMember(state, m.id), m.isAdmin ? '기기 연결을 끊었어요 · 관리자 권한도 해제됐어요' : '기기 연결을 끊었어요');
         return;
       }
       const rm = e.target.closest('[data-remove]');
       if (rm) {
-        const ok = await ask({ emoji: '🚪', title: `${memberName(m)}님을 가족에서 내보낼까요?`, body: '그동안의 기록은 남고, 그 사람의 기기 연결은 끊겨요.', buttons: [{ label: '내보내기', value: true, kind: 'danger' }, { label: '취소', value: false }], dismiss: false });
-        if (ok) await busy(rm, () => removeMember(state, m.id), '내보냈어요');
+        const ok = await ask({ emoji: '🚪', title: `${eul(memberName(m))} 가족에서 내보낼까요?`, body: '그동안의 기록은 남고, 그 사람의 기기 연결은 끊겨요. 초대 링크도 새로 바뀌어서 예전 링크로는 다시 들어올 수 없어요.', buttons: [{ label: '내보내기', value: true, kind: 'danger' }, { label: '취소', value: false }], dismiss: false });
+        if (ok) await busy(rm, () => removeMember(state, m.id), '내보냈어요 · 초대 링크도 새로 바뀌었어요 (예전 링크는 이제 안 돼요)');
       }
     },
   });
@@ -2024,10 +2057,16 @@ function openJoinSheet(prefill = '') {
     return;
   }
   const inviteCode = parseJoin(prefill)?.code || '';
-  const iosTip = isIOS && !isStandalone && inviteCode ? `
-    <p class="sheet-note">📲 <b>홈 화면에 추가해서 쓰실 거면:</b> ① 사파리 공유 → 홈 화면에 추가 ② 앱을 열고 <b>초대 링크를 받았어요</b>에 이 코드를 붙여넣기
+  // 카톡·인스타 안: 여기서 참여하면 이 앱 안에만 따로 저장되고, 나중에 사파리·홈 화면 앱에서 '나'를 고를 수 없게 된다
+  const inAppWarn = isInApp ? `
+    <div class="sheet-note danger" style="margin-top:6px">📱 <b>카카오톡·인스타 안에서 열렸어요.</b> 여기서 참여하면 기록이 이 앱 안에만 따로 저장돼요.<br />
+      오른쪽 위 <b>⋯ → 다른 브라우저로 열기</b>(아이폰은 사파리)로 이 링크를 열어 참여해 주세요.
+      <button class="btn btn-primary btn-sm" data-inapp-copy="1" style="margin-top:8px;width:100%">링크 복사</button></div>` : '';
+  const iosTip = isIOS && !isStandalone && !isInApp && inviteCode ? `
+    <p class="sheet-note">📲 <b>홈 화면 앱으로 쓰실 거면 여기(사파리)서는 참여하지 말고:</b> ① 사파리 공유 → 홈 화면에 추가 ② 앱을 열고 <b>초대 링크를 받았어요</b>에 이 코드를 붙여넣기 (사파리와 홈 화면 앱은 저장소가 따로라, 참여는 쓸 곳에서 한 번만)
       <button class="btn btn-ghost btn-sm" data-copycode="${esc(inviteCode)}" style="margin-top:8px;width:100%">코드 복사 (${esc(inviteCode)})</button></p>` : '';
   const html = `
+    ${inAppWarn}
     <div class="sec"><div class="sec-title">초대 링크나 코드</div>
       <div class="field-row"><input class="field" id="joinInput" value="${esc(prefill)}" placeholder="링크 또는 16자리 코드 붙여넣기" autocomplete="off" autocapitalize="characters" />
       <button class="btn btn-primary btn-sm" data-peek="1">확인</button></div></div>
@@ -2041,6 +2080,7 @@ function openJoinSheet(prefill = '') {
     },
     onClick: async (e) => {
       if (e.target.closest('[data-peek]')) { doPeek(); return; }
+      if (e.target.closest('[data-inapp-copy]')) { copyText(location.href.split('#')[0] + (location.hash || ''), '링크를 복사했어요 — 사파리/크롬 주소창에 붙여 넣어 주세요'); return; }
       const cc = e.target.closest('[data-copycode]');
       if (cc) { copyText(cc.dataset.copycode, '코드를 복사했어요'); return; }
       if (joinCtl.onClick) joinCtl.onClick(e);
@@ -2066,6 +2106,12 @@ async function doPeek() {
   if (!$('joinBody')) return;
   const famName = info.family?.name || '우리 아기';
   const f = { claim: null, role: null };
+  // 이 참여 한 번의 표시 — '다시 시도'를 눌러도 같은 값을 보내서, 앞 응답만 끊긴 경우 자리가 둘로 늘지 않게
+  const attempt = { nonce: makeJoinNonce(), meId: uuid() };
+  // 카톡 안에서는 참여를 한 번 더 생각하게 (보조 버튼)
+  const joinBtn = (label) => (isInApp
+    ? `<button class="link-btn" data-join="1">그래도 여기(카톡 안)서 ${esc(label)}</button>`
+    : `<button class="btn btn-primary btn-block" data-join="1">${esc(label)}</button>`);
   // 이미 이 가족과 공유 중인 기기가 초대 링크를 다시 연 경우 (카톡에서 링크를 또 누름 등)
   if (state.sync.token && !state.sync.revoked && info.kind !== 'device' && famName === (state.family.name || '우리 아기')) {
     pendingJoin = '';
@@ -2088,18 +2134,18 @@ async function doPeek() {
     }
     body.innerHTML = `
       <div class="honest">📱 <b>${esc(m.emoji || '')} ${esc(euro(m.name || '가족'))} 이 기기를 연결할까요?</b><br />${esc(famName)} 육아일지 · 내 다른 기기 연결 링크(1회용)</div>
-      <div class="sheet-actions"><button class="btn btn-primary btn-block" data-join="1">연결하기</button></div>`;
+      <div class="sheet-actions">${joinBtn('연결하기')}</div>`;
   } else {
     const names = info.members.filter((m) => m.claimed).map((m) => m.name).join('·');
     body.innerHTML = `
       <div class="honest"><b>${esc(famName)} 육아일지</b>${names ? ` (${esc(names)} 참여중)` : ''}</div>
       ${info.members.length ? `<div class="sec"><div class="sec-title">저는 이 사람이에요</div>
         <div class="opts cols-2">${info.members.map((m) => `<button type="button" class="opt${m.claimed ? ' stacked' : ''}" data-grp="claim" data-val="${esc(m.id)}" ${m.claimed ? 'disabled aria-disabled="true"' : ''}>${esc(m.emoji || '🙂')} ${esc(m.name)}${m.claimed ? '<small style="display:block;font-size:11px;font-weight:600">다른 기기에서 사용 중</small>' : ''}</button>`).join('')}</div>
-        ${info.members.some((m) => m.claimed) ? '<p class="sheet-note">내 폰이 이미 연결돼 있고 이 기기를 더 쓰려면: 원래 폰의 <b>설정 → 내 다른 기기 연결</b> 링크를 여기서 열어 주세요.</p>' : ''}</div>` : ''}
+        ${info.members.some((m) => m.claimed) ? '<p class="sheet-note">이미 다른 곳(다른 폰·카톡 안·사파리·홈 화면 앱)에서 참여했다면: 그곳의 <b>설정 → 내 다른 기기 연결</b> 링크(또는 코드)를 여기에 붙여 넣어 주세요.</p>' : ''}</div>` : ''}
       <div class="sec"><div class="sec-title">처음 참여해요</div>
         <div class="role-chips">${ROLES.map((r) => `<button type="button" class="opt" data-grp="role" data-val="${r.id}">${r.emoji} ${esc(r.label)}</button>`).join('')}</div>
         <input class="field" id="joinName" maxlength="${LIMITS.memberName}" placeholder="${esc(NAME_PLACEHOLDER.default)}" style="margin-top:10px" autocomplete="off" /></div>
-      <div class="sheet-actions"><button class="btn btn-primary btn-block" data-join="1">참여하기</button></div>`;
+      <div class="sheet-actions">${joinBtn('참여하기')}</div>`;
   }
   joinCtl.onClick = async (e) => {
     const g = pickOpt(e, f);
@@ -2118,12 +2164,12 @@ async function doPeek() {
     const jb = e.target.closest('[data-join]');
     if (!jb) return;
     if (info.kind !== 'device' && !f.claim && !f.role) { showToast('나를 골라 주세요 (기존 사람 또는 처음 참여)'); return; }
-    const opts = {};
+    const opts = { nonce: attempt.nonce };
     if (info.kind !== 'device') {
       if (f.claim) opts.claim = f.claim;
       else {
         const r = ROLE_BY_ID[f.role];
-        opts.me = { role: r.id, name: $('joinName').value.trim() || r.label, emoji: r.emoji };
+        opts.me = { id: attempt.meId, role: r.id, name: $('joinName').value.trim() || r.label, emoji: r.emoji };
       }
     }
     await runJoin(text, opts, famName, jb);
@@ -2171,7 +2217,7 @@ async function runJoin(code, opts, famName, btn) {
     }
     if (err?.code === 'already_shared') msg = ERROR_COPY.already_shared;
     showToast(msg, 4500);
-    if (btn) { btn.disabled = false; btn.textContent = '다시 시도'; }
+    if (btn) { btn.disabled = false; btn.textContent = '다시 시도'; }   // 다시 누르면 같은 nonce·me.id 로 (doPeek 의 attempt)
   }
 }
 
@@ -2225,6 +2271,17 @@ const LOCK_LABEL = { pee: '소변 기록', poop: '대변 기록', both: '소변+
 
 function openLockSheet(tab = isAndroid ? 'android' : 'ios') {
   const shared = !!state.sync.token && !state.sync.revoked;
+  // 잠금화면 주소에는 기기 토큰 대신 '기록 전용 키'를 넣는다 — 처음 열 때 서버에서 받아 온다
+  if (shared && !state.sync.quickKey) {
+    openSheet('🔒 잠금화면에서 기록하기', '<p class="sheet-note">내 기록 주소를 만드는 중…</p>');
+    // 그사이 다른 시트로 바꿨으면 건드리지 않는다
+    const stillHere = () => sheet.open && $('sheetTitle').textContent === '🔒 잠금화면에서 기록하기';
+    ensureQuickKey(state).then(() => { save(state); if (stillHere()) openLockSheet(tab); }).catch((err) => {
+      if (state.sync.revoked) render();
+      if (stillHere()) openSheet('🔒 잠금화면에서 기록하기', `<p class="sheet-note warn">${esc(errMsg(err))}</p><p class="sheet-note">인터넷이 연결되면 다시 열어 주세요.</p>`);
+    });
+    return;
+  }
   const urlFor = (t) => {
     if (t === 'formula') {
       const ml = state.prefs.lastMl?.formula ?? lastMl(state.events, 'formula');
@@ -2240,29 +2297,15 @@ function openLockSheet(tab = isAndroid ? 'android' : 'ios') {
   const needShare = `
     <div class="honest">🔒 잠금화면 기록은 <b>'가족 공유'를 켜면</b> 쓸 수 있어요 (아이폰은 단축어가 서버로 바로 기록해요).</div>
     ${canShare() ? '<div class="sheet-actions"><button class="btn btn-primary btn-block" data-invite="1">가족 공유 켜기</button></div>' : '<p class="sheet-note">🌱 가족 공유는 곧 열려요. 그동안은 앱을 홈 화면에 추가해 두면 <b>앱 첫 화면에서 언제나 한 번 탭</b>으로 기록돼요.</p>'}`;
-  const secretWarn = '<p class="sheet-note danger">🔑 이 주소는 비밀번호와 같아요 — 다른 사람에게 보내지 마세요. 유출됐다면 관리자에게 <b>설정 → 가족 멤버 → 기기 연결 해제(폰 분실 시)</b>를 부탁한 뒤, 초대 링크로 나를 다시 골라 참여해 주세요.</p>';
+  const secretWarn = (what = '주소') => `<p class="sheet-note danger">🔑 이 ${what}로는 <b>내 이름으로 기록</b>만 할 수 있어요 (가족 기록을 읽을 수는 없어요). 그래도 다른 사람에게 보내지 마세요. 샜다면 아래 <b>[${what} 새로 만들기]</b>를 누르면 예전 ${what}는 바로 멈춰요.</p>
+    <button class="btn btn-ghost btn-block btn-sm" data-rotate-quick="1" style="margin-top:8px">🔄 ${what} 새로 만들기</button>`;
 
   // ---- 아이폰 ----
   let ios = '';
   const links = BRAND.iosShortcuts || {};
   const hasLinks = LOCK_TYPES.some((t) => links[t]);
-  if (!shared) ios = needShare;
-  else if (hasLinks) {
-    ios = `
-      <ol class="steps">
-        <li><b>[내 코드 복사]</b>를 눌러요.<div style="margin-top:6px"><button class="btn btn-primary btn-sm" data-copyurl="${esc(state.sync.token)}" data-msg="내 코드를 복사했어요 — 단축어 코드 칸에 붙여 넣어 주세요">🔑 내 코드 복사</button></div></li>
-        <li>아래 버튼을 누르면 '단축어' 앱이 열려요. 코드 칸에 <b>붙여넣기</b> → <b>단축어 추가</b>.
-          <div class="opts cols-2" style="margin-top:6px">${LOCK_TYPES.filter((t) => links[t]).map((t) => `<a class="opt" href="${esc(links[t])}" target="_blank" rel="noopener" style="text-decoration:none">${typeMeta(t).emoji} ${esc(typeMeta(t).label)} 버튼 받기</a>`).join('')}</div></li>
-        <li>단축어 앱에서 방금 받은 단축어를 <b>한 번 눌러 실행</b>해요. 연결을 허용할지 물으면 <b>'항상 허용'</b>. "✓ 기록" 알림이 오면 준비 끝!</li>
-        ${lockStepsIOS()}
-      </ol>${secretWarn}`;
-  } else {
-    ios = `
-      <div class="sec"><div class="sec-title">1) 내 개인 주소 <span class="sub">단축어에 붙여 넣을 주소</span></div>
-        ${copyRows(LOCK_TYPES)}
-        <div class="copy-row"><span class="cr-label">🎙 말로 기록</span><code>${esc(quickUrl(state, 'say'))}&amp;say=</code><button class="btn btn-ghost btn-sm" data-copyurl="${esc(`${quickUrl(state, 'say')}&say=`)}">복사</button></div>
-        ${secretWarn}</div>
-      <div class="sec"><div class="sec-title">2) 단축어 만들기 <span class="sub">버튼 하나당 한 번</span></div>
+  const sayRow = `<div class="copy-row"><span class="cr-label">🎙 말로 기록</span><code>${esc(quickUrl(state, 'say'))}&amp;say=</code><button class="btn btn-ghost btn-sm" data-copyurl="${esc(`${quickUrl(state, 'say')}&say=`)}">복사</button></div>`;
+  const manualSteps = `
         <ol class="steps">
           <li><b>단축어</b> 앱 → 오른쪽 위 <b>'+'</b></li>
           <li><b>'URL의 콘텐츠 가져오기'</b> 동작 추가 → URL 칸에 위 <b>개인 주소</b> 붙여넣기</li>
@@ -2271,7 +2314,31 @@ function openLockSheet(tab = isAndroid ? 'android' : 'ios') {
           <li>단축어 이름을 <b>"소변 기록"</b>처럼 정하고 완료</li>
           <li>한 번 눌러 실행 → 허용을 물으면 <b>'항상 허용'</b>. "✓ 소변 기록" 알림이 오면 성공!</li>
         </ol>
-        <p class="sheet-note">🎙 말로 기록: 'URL의 콘텐츠 가져오기' 앞에 <b>'텍스트 받아쓰기'</b>를 넣고, URL 끝 <b>say=</b> 뒤에 '받아쓴 텍스트'를 넣어요. "분유 120", "쉬했어", "잠들었어"처럼 말하면 돼요.</p></div>
+        <p class="sheet-note">🎙 말로 기록: 'URL의 콘텐츠 가져오기' 앞에 <b>'텍스트 받아쓰기'</b>를 넣고, URL 끝 <b>say=</b> 뒤에 '받아쓴 텍스트'를 넣어요. "분유 120", "쉬했어", "잠들었어"처럼 말하면 돼요.</p>`;
+  if (!shared) ios = needShare;
+  else if (hasLinks) {
+    // 받을 단축어가 준비된 종류는 버튼으로, 나머지(와 말로 기록)는 직접 만드는 주소로 — 한 종류도 길이 끊기지 않게
+    const manualTypes = LOCK_TYPES.filter((t) => !links[t]);
+    ios = `
+      <ol class="steps">
+        <li><b>[내 코드 복사]</b>를 눌러요.<div style="margin-top:6px"><button class="btn btn-primary btn-sm" data-copyurl="${esc(state.sync.quickKey || '')}" data-msg="내 코드를 복사했어요 — 단축어 코드 칸에 붙여 넣어 주세요">🔑 내 코드 복사</button></div></li>
+        <li>아래 버튼을 누르면 '단축어' 앱이 열려요. 코드 칸에 <b>붙여넣기</b> → <b>단축어 추가</b>.
+          <div class="opts cols-2" style="margin-top:6px">${LOCK_TYPES.filter((t) => links[t]).map((t) => `<a class="opt" href="${esc(links[t])}" target="_blank" rel="noopener" style="text-decoration:none">${typeMeta(t).emoji} ${esc(typeMeta(t).label)} 버튼 받기</a>`).join('')}</div></li>
+        <li>단축어 앱에서 방금 받은 단축어를 <b>한 번 눌러 실행</b>해요. 연결을 허용할지 물으면 <b>'항상 허용'</b>. "✓ 기록" 알림이 오면 준비 끝!</li>
+        ${lockStepsIOS()}
+      </ol>${secretWarn('코드')}
+      <div class="sec"><div class="sec-title">직접 만들기 <span class="sub">${manualTypes.length ? '받을 버튼이 없는 기록 · ' : ''}말로 기록</span></div>
+        ${copyRows(manualTypes)}
+        ${sayRow}
+        ${manualSteps}</div>`;
+  } else {
+    ios = `
+      <div class="sec"><div class="sec-title">1) 내 개인 주소 <span class="sub">단축어에 붙여 넣을 주소</span></div>
+        ${copyRows(LOCK_TYPES)}
+        ${sayRow}
+        ${secretWarn()}</div>
+      <div class="sec"><div class="sec-title">2) 단축어 만들기 <span class="sub">버튼 하나당 한 번</span></div>
+        ${manualSteps}</div>
       <div class="sec"><div class="sec-title">3) 잠금화면에 놓기</div><ol class="steps">${lockStepsIOS()}</ol></div>`;
   }
 
@@ -2282,7 +2349,7 @@ function openLockSheet(tab = isAndroid ? 'android' : 'ios') {
   const android = `
     <div class="sec"><div class="sec-title">① 앱 아이콘 길게 누르기 <span class="sub">잠금 해제 필요</span></div>
       <p class="sheet-note" style="margin-top:0">홈 화면에 추가한 앱 아이콘을 <b>길게 누르면</b> 💧소변 · 💩대변 · 🍼분유 · 😴잠 바로가기가 나와요. 끌어서 홈 화면에 따로 놓을 수도 있어요.</p>
-      ${isStandalone ? '' : '<button class="btn btn-ghost btn-block" data-install="1" style="margin-top:10px">📲 먼저 홈 화면에 추가하기</button>'}</div>
+      ${isStandalone || isInApp ? '' : '<button class="btn btn-ghost btn-block" data-install="1" style="margin-top:10px">📲 먼저 홈 화면에 추가하기</button>'}</div>
     <div class="sec"><div class="sec-title">② 알림 버튼 (베타) <span class="sub">앱 설치 없이</span></div>
       ${notifOk ? `
         <p class="sheet-note" style="margin-top:0">알림창에 <b>버튼 2개</b>가 붙어요. 잠금화면에서 누르면 바로 기록돼요 (기종마다 확인이 필요해요). 알림을 밀어서 지우면 앱을 열 때 다시 생겨요.</p>
@@ -2296,23 +2363,24 @@ function openLockSheet(tab = isAndroid ? 'android' : 'ios') {
     <div class="sec"><div class="sec-title">③ HTTP Shortcuts 앱 + 빠른 설정 타일 <span class="sub">가장 확실해요</span></div>
       ${shared ? `
         <ol class="steps">
-          <li>Play 스토어에서 <b>'HTTP Shortcuts'</b>(무료·광고 없음)를 설치해요.</li>
-          <li>앱에서 <b>'+'</b> → 새 바로가기 → 이름 <b>"소변 기록"</b></li>
-          <li><b>방법: POST</b>, URL에 아래 개인 주소를 붙여 넣어요.</li>
-          <li><b>응답 처리</b>에서 표시 방식을 <b>'토스트'</b>로 (창으로 두면 잠금화면에서 안 돼요) → 저장</li>
-          <li>화면 위에서 내려 <b>빠른 설정창 → 연필(편집)</b> → <b>'바로가기 시작'</b> 타일을 끌어다 놓고 완료. 타일에는 바로가기 <b>하나만</b> 연결해 주세요.</li>
+          <li>Play 스토어에서 <b>'HTTP Shortcuts'</b>(무료·광고 없음)를 설치해요. <b>알림 권한</b>을 물으면 <b>허용</b> (잠금화면에서 결과를 띄우는 데 필요해요).</li>
+          <li>앱에서 <b>'+'(새 바로가기)</b> → 이름 <b>"소변 기록"</b></li>
+          <li><b>메소드: POST</b>, URL에 아래 개인 주소를 붙여 넣어요.</li>
+          <li><b>응답 처리 → 표시 방법</b>을 <b>'Toast 팝업'</b>으로 바꿔요 (기본값 '전체화면'이면 잠금화면에서 안 돼요).</li>
+          <li><b>실행 관련 설정</b> → <b>'빠른 설정창 버튼으로 시작'</b>을 체크하고 저장. 이 체크는 바로가기 <b>하나에만</b> 해 주세요 (둘 이상이면 타일을 누를 때마다 고르라고 물어요).</li>
+          <li>화면 위에서 내려 <b>빠른 설정창 → 연필(편집)</b> → <b>'바로가기 시작'</b> 타일을 끌어다 놓고 완료.</li>
           <li>잠긴 상태에서 빠른 설정창을 내려 타일을 누르면 끝! "✓ 기록" 메시지가 떠요. 나머지는 홈 화면 <b>위젯</b>으로 놓아두세요.</li>
         </ol>
-        ${copyRows(['pee', 'poop', 'formula', 'sleep', 'burp'])}${secretWarn}` : needShare}</div>`;
+        ${copyRows(['pee', 'poop', 'formula', 'sleep', 'burp'])}${secretWarn()}` : needShare}</div>`;
 
   const html = `
     <div class="ptabs" role="tablist">
-      <button class="ptab${tab === 'ios' ? ' active' : ''}" data-ptab="ios" role="tab">🍎 아이폰</button>
-      <button class="ptab${tab === 'android' ? ' active' : ''}" data-ptab="android" role="tab">🤖 갤럭시·안드로이드</button>
+      <button class="ptab${tab === 'ios' ? ' active' : ''}" data-ptab="ios" role="tab" aria-selected="${tab === 'ios'}">🍎 아이폰</button>
+      <button class="ptab${tab === 'android' ? ' active' : ''}" data-ptab="android" role="tab" aria-selected="${tab === 'android'}">🤖 갤럭시·안드로이드</button>
     </div>
     <div class="honest">솔직하게 말하면: <b>잠금화면에서는 1~2탭</b> (단축어·알림 설정 시), <b>앱 첫 화면에서는 언제나 1탭</b>이에요. 기종마다 한 번 시험해 보세요.</div>
     <div id="lockBody">${tab === 'ios' ? ios : android}</div>
-    ${!isStandalone ? '<button class="btn btn-ghost btn-block" data-install="1" style="margin-top:16px">📲 홈 화면에 추가하기</button>' : ''}`;
+    ${!isStandalone && !isInApp ? '<button class="btn btn-ghost btn-block" data-install="1" style="margin-top:16px">📲 홈 화면에 추가하기</button>' : ''}`;
   openSheet('🔒 잠금화면에서 기록하기', html, {
     onClick: async (e) => {
       const pt = e.target.closest('[data-ptab]');
@@ -2321,6 +2389,14 @@ function openLockSheet(tab = isAndroid ? 'android' : 'ios') {
       if (cu) { copyText(cu.dataset.copyurl, cu.dataset.msg || '주소를 복사했어요 — 단축어에 붙여 넣어 주세요'); return; }
       if (e.target.closest('[data-invite]')) { openInviteSheet(); return; }
       if (e.target.closest('[data-install]')) { onInstall(); return; }
+      const rq = e.target.closest('[data-rotate-quick]');
+      if (rq) {
+        const ok = await ask({ emoji: '🔄', title: '기록 주소(코드)를 새로 만들까요?', body: '예전 주소로 만든 단축어·위젯은 바로 멈춰요. 새 주소를 복사해서 단축어마다 다시 붙여 넣어 주세요.', buttons: [{ label: '새로 만들기', value: true, kind: 'primary' }, { label: '취소', value: false }], dismiss: false });
+        if (!ok) return;
+        rq.disabled = true;
+        try { await ensureQuickKey(state, { rotate: true }); save(state); openLockSheet(tab); showToast('새 주소를 만들었어요 — 단축어에 다시 붙여 넣어 주세요', 3500); } catch (err) { showToast(errMsg(err), 3500); rq.disabled = false; }
+        return;
+      }
       const q = e.target.closest('[data-qa]');
       if (q) {
         let list = (state.prefs.quickActions || []).filter((t) => NOTIF_TYPES.includes(t));
@@ -2466,6 +2542,7 @@ function openSettingsSheet() {
       ${shared ? `
         ${state.sync.isAdmin ? '<button class="btn btn-ghost btn-block btn-sm" data-invite="1">초대 링크 보기 · 새로 만들기</button>' : '<button class="btn btn-ghost btn-block btn-sm" data-invite="1">가족 초대</button>'}
         <button class="btn btn-ghost btn-block btn-sm" data-devlink-open="1" style="margin-top:8px">📱 내 다른 기기 연결</button>
+        <button class="btn btn-ghost btn-block btn-sm" data-signout="1" style="margin-top:8px">📵 내 다른 기기 연결 모두 끊기</button>
         <button class="btn btn-ghost btn-block btn-sm" data-leave="1" style="margin-top:8px">이 기기 공유 끊기</button>`
       : `<button class="btn btn-ghost btn-block btn-sm" data-invite="1">${canShare() ? '가족 공유 켜기' : '가족 공유 (곧 열려요)'}</button>
          <button class="btn btn-ghost btn-block btn-sm" data-join="1" style="margin-top:8px">초대 링크로 참여하기</button>`}</div>
@@ -2531,6 +2608,14 @@ function openSettingsSheet() {
       if (e.target.closest('[data-invite]')) { openInviteSheet(); return; }
       if (e.target.closest('[data-devlink-open]')) { openDeviceLinkSheet(); return; }
       if (e.target.closest('[data-join]')) { openJoinSheet(''); return; }
+      const so = e.target.closest('[data-signout]');
+      if (so) {
+        const ok = await ask({ emoji: '📵', title: '내 다른 기기 연결을 모두 끊을까요?', body: '이 기기만 남기고, 같은 이름으로 연결된 다른 폰·태블릿·브라우저는 모두 끊겨요. 연결 링크나 폰을 잃어버렸을 때 쓰세요. (잠금화면 주소는 🔒 잠금화면 기록에서 새로 만들 수 있어요)', buttons: [{ label: '모두 끊기', value: true, kind: 'danger' }, { label: '취소', value: false }], dismiss: false });
+        if (!ok) return;
+        so.disabled = true;
+        try { await signOutOtherDevices(state); save(state); render(); showToast('다른 기기 연결을 모두 끊었어요'); } catch (err) { showToast(errMsg(err), 3500); so.disabled = false; }
+        return;
+      }
       if (e.target.closest('[data-leave]')) {
         const ok = await ask({ emoji: '🔌', title: '이 기기의 공유를 끊을까요?', body: '이 기기 기록은 그대로 남고, 가족 기록도 다른 기기에 남아요. 다시 참여하려면 초대 링크가 필요해요.', buttons: [{ label: '끊기', value: true, kind: 'danger' }, { label: '취소', value: false }], dismiss: false });
         if (!ok) return;
@@ -2579,6 +2664,9 @@ async function handleRestore(file) {
   }
   if (!state.family.birth && b.family.birth) updateFamily(state, { name: state.family.name || b.family.name, birth: b.family.birth }, now);
   if (!isSetUp()) state.meId = b.meId && state.members.some((m) => m.id === b.meId) ? b.meId : (state.members[0]?.id ?? null);
+  if (!state.selfId || !state.members.some((m) => m.id === state.selfId)) {
+    state.selfId = b.selfId && state.members.some((m) => m.id === b.selfId) ? b.selfId : state.meId;
+  }
   if (fresh) {
     state.prefs = { ...b.prefs, seenStage: null };
     applyTheme();
@@ -2613,6 +2701,12 @@ async function wipeAll() {
 // 홈 화면 추가 (PWA)
 // ============================================================
 function onInstall() {
+  if (isInApp) {
+    // 카톡·인스타 안에서는 홈 화면에 추가할 수 없다 — 먼저 사파리/크롬으로
+    openSheet('📲 홈 화면에 추가하는 법', `
+      <div class="honest">📱 <b>카카오톡·인스타 안에서는 홈 화면에 추가할 수 없어요.</b><br />오른쪽 위 <b>⋯ → 다른 브라우저로 열기</b>(아이폰은 사파리, 갤럭시는 크롬)로 연 다음 추가해 주세요.</div>`);
+    return;
+  }
   if (ui.installPrompt) {
     const p = ui.installPrompt;
     ui.installPrompt = null;
@@ -2727,7 +2821,7 @@ function bindMain() {
     if (!t) return;
     ui.tab = t.dataset.tab;
     ui.extraDays = 0;
-    for (const x of $('tlTabs').querySelectorAll('.tab')) x.classList.toggle('active', x === t);
+    for (const x of $('tlTabs').querySelectorAll('.tab')) { x.classList.toggle('active', x === t); x.setAttribute('aria-selected', String(x === t)); }
     renderTimeline(ctx());
   });
   $('tlMore').addEventListener('click', () => { ui.extraDays += 3; renderTimeline(ctx()); });
@@ -2748,12 +2842,25 @@ function bindMain() {
   $('installBtn').addEventListener('click', onInstall);
   $('revokedJoin').addEventListener('click', () => openJoinSheet(''));
   $('inappCopy').addEventListener('click', () => copyText(location.href.split('#')[0] + (location.hash || ''), '링크를 복사했어요 — 사파리/크롬 주소창에 붙여 넣어 주세요'));
+  $('inappX').addEventListener('click', () => { ui.inappCompact = true; renderBanners(); });
 
   // 시트 · 모달 · 토스트
   $('sheetClose').addEventListener('click', closeSheet);
   $('sheetDim').addEventListener('click', (e) => { if (e.target === $('sheetDim')) closeSheet(); });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && sheet.open && $('modalDim').classList.contains('hidden')) closeSheet();
+    if (!sheet.open || !$('modalDim').classList.contains('hidden')) return;
+    if (e.key === 'Escape') { closeSheet(); return; }
+    // Tab 은 시트 안에서만 돈다 (aria-modal)
+    if (e.key === 'Tab') {
+      const list = sheetFocusables();
+      if (!list.length) return;
+      const first = list[0];
+      const last = list[list.length - 1];
+      const a = document.activeElement;
+      if (!$('sheet').contains(a)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+      else if (e.shiftKey && a === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && a === last) { e.preventDefault(); first.focus(); }
+    }
   });
   $('undoBtn').addEventListener('click', () => { const u = ui.undo; hideUndo(); u?.undo?.(); });
   $('undoEdit').addEventListener('click', () => { const u = ui.undo; hideUndo(); u?.edit?.(); });
@@ -2832,9 +2939,10 @@ function init() {
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     ui.installPrompt = e;
-    if (!isStandalone) $('installBtn').classList.remove('hidden');
+    if (!isStandalone && !isInApp) $('installBtn').classList.remove('hidden');
   });
-  if (!isStandalone && isIOS) $('installBtn').classList.remove('hidden');
+  // 카톡·인스타 안에서는 홈 화면 추가가 안 되고 사파리 안내만 헷갈리게 한다 → 버튼을 숨김 (상단 안내가 대신)
+  if (!isStandalone && isIOS && !isInApp) $('installBtn').classList.remove('hidden');
 
   render();
 

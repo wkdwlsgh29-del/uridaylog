@@ -11,13 +11,13 @@
 //      - handler.js (서버 로직)
 //      - parse.js (받아쓰기 한 문장 파서)
 //      ※ dev-server.mjs, package.json, test/ 는 로컬 전용 — 올리지 않는다.
-//   3) 배포 대상: Supabase 프로젝트 bmedbitonzkggfenymog (uriday-ics 와 같은 프로젝트),
+//   3) 배포 대상: 육아 기록 전용 Supabase 프로젝트 (무료 조직 uridaylog, 서울 리전 — 다른 서비스 DB 와 분리),
 //      함수명 uriday-log, verify_jwt=false (단축어·앱이 Supabase JWT 없이 부른다)
 //   4) 비밀값(Secrets):
 //      - SUPABASE_DB_URL: Supabase 가 모든 Edge Function 에 기본으로 넣어 주는 secret — 따로 설정할 필요 없음.
 //      - BL_SALT (선택): 레이트 리밋용 IP 해시 salt. 긴 랜덤 문자열 권장. 바꿔도 리밋 카운터만 초기화된다.
 //   5) 웹 연결: shared/js/brand.js 의 logEndpoint =
-//      'https://bmedbitonzkggfenymog.supabase.co/functions/v1/uriday-log'
+//      'https://<육아일지 프로젝트 ref>.supabase.co/functions/v1/uriday-log'
 //   handler.js·parse.js 를 고치면 이 함수도 재배포해야 한다.
 //
 // 로컬 확인: SUPABASE_DB_URL=postgresql://postgres@localhost:54329/babylog deno run -A index.ts  (포트 8000)

@@ -3,7 +3,6 @@
   "short_name": "육아일지",
   "description": "엄마·아빠·시터가 같이 쓰는 육아일지. 가입 없이 탭 한 번으로 기록하고 교대 요약을 보내요.",
   "lang": "ko",
-  "id": "./",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

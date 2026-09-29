@@ -10,8 +10,13 @@
 //   · activate 때 옛 캐시 정리는 'uriday-bl-' 로 시작하는 내 캐시만 — 데이터 캐시(DATA_CACHE)는 절대 지우지 않는다.
 //
 // 알림 버튼 (sync.js 머리 주석의 계약)
-//   · 페이지가 Cache Storage `DATA_CACHE`의 ./__bl/config 에 { endpoint, token, meId, quickActions, lastMl, babyName } 을 써 둔다.
+//   · 페이지가 Cache Storage `DATA_CACHE`의 ./__bl/config 에 { endpoint, token, meId, selfId, quickActions, lastMl, babyName } 을 써 둔다.
 //   · 버튼 탭 → id(uuid)를 먼저 만들고, 공유 중이면 quick 주소에 POST (&src=notif&id=&ts=).
+//     기기 토큰은 주소가 아니라 본문(k=, form)으로 보낸다 — 요청 주소는 서버·프록시 기록에 남을 수 있어서.
+//     (form 본문은 CORS 사전 요청이 없어 새벽 잠금화면에서도 한 번에 간다)
+//   · 수신함 기록의 '누가' = selfId(이 기기 주인) — 온라인일 때 서버가 토큰의 사람으로 기록하는 것과 같게.
+//   · 분유·유축 양: config.lastMl 에 있으면 그 양, 없으면 서버가 가족의 마지막 양으로 (수신함은 마지막 수단으로 100).
+//   · 401 = 이 기기 가족 연결이 끊김 → '가족에게 보내져요'라고 하지 않는다 (수신함에는 넣어 둠 — 다시 참여하면 올라감).
 //     실패하거나 공유 전이면 같은 id 로 ./__bl/inbox/<id> 에 한 건 넣는다 → 앱을 열면 sync.drainInbox 가 가져감.
 //     (서버에 사실은 들어갔는데 응답만 끊긴 경우도 서버가 id 로 중복을 막는다)
 //   · 그다음 같은 tag 로 알림을 다시 띄운다 (웹엔 '고정 알림'이 없어서 — RESEARCH D). 본문 = 서버 응답 첫 줄.
@@ -182,17 +187,18 @@ function fmtTime(ts) {
   return `${h < 12 ? '오전' : '오후'} ${h % 12 === 0 ? 12 : h % 12}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+// 이 종류의 마지막 양 (config 에 없으면 null — 서버가 가족의 마지막 양을 쓰게 주소에서 뺀다)
 function mlFor(type, cfg) {
   const last = cfg && cfg.lastMl ? cfg.lastMl : {};
-  return Number(last[type]) || Number(last.formula) || 100;
+  return Number(last[type]) || null;
 }
 
 /** 수신함에 한 건 넣기 (앱이 열리면 sync.drainInbox 가 가져감) */
 async function queueInbox(id, type, ts, cfg) {
   const data = { src: 'notif' };
-  if (type === 'formula' || type === 'pumped') data.ml = mlFor(type, cfg);
+  if (type === 'formula' || type === 'pumped') data.ml = mlFor(type, cfg) || mlFor('formula', cfg) || 100;
   if (type === 'tummy') data.min = 5;
-  const body = { id, type, ts, by: (cfg && cfg.meId) || null, data };
+  const body = { id, type, ts, by: (cfg && (cfg.selfId || cfg.meId)) || null, data };
   const c = await caches.open(DATA_CACHE);
   await c.put(dataUrl(`./__bl/inbox/${id}`), new Response(JSON.stringify(body), {
     headers: { 'content-type': 'application/json; charset=utf-8' },
@@ -202,16 +208,19 @@ async function queueInbox(id, type, ts, cfg) {
 async function postQuick(cfg, type, id, ts) {
   const u = new URL(cfg.endpoint);
   u.searchParams.set('a', 'q');
-  u.searchParams.set('k', cfg.token);
   u.searchParams.set('t', type);
-  if (type === 'formula' || type === 'pumped') u.searchParams.set('ml', String(mlFor(type, cfg)));
+  const ml = type === 'formula' || type === 'pumped' ? mlFor(type, cfg) : null;
+  if (ml) u.searchParams.set('ml', String(ml));
   u.searchParams.set('src', 'notif');
   u.searchParams.set('id', id);
   u.searchParams.set('ts', String(ts));
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 12000);
   try {
-    const res = await fetch(u.href, { method: 'POST', signal: ctrl.signal, cache: 'no-store', credentials: 'omit' });
+    const res = await fetch(u.href, {
+      method: 'POST', signal: ctrl.signal, cache: 'no-store', credentials: 'omit',
+      body: new URLSearchParams({ k: cfg.token }),   // 토큰은 본문으로 (주소에 넣지 않음)
+    });
     const text = (await res.text()).trim();
     return { status: res.status, ok: res.ok, text };
   } finally {
@@ -255,6 +264,11 @@ async function handleAction(type) {
       } else if (r.status === 400) {
         // 서버가 내용을 받지 않음 — 다시 보내도 같으니 알림으로만 알린다
         body = `⚠ ${r.text.split('\n')[0] || '기록하지 못했어요'} — 앱에서 기록해 주세요`;
+      } else if (r.status === 401) {
+        // 이 기기의 가족 연결이 끊김 — 인터넷 문제가 아니니 '가족에게 보내져요'라고 하지 않는다.
+        // 기록은 이 기기 수신함에 남겨 둔다 (같은 가족에 다시 참여하면 함께 올라감)
+        await queueInbox(id, type, ts, cfg);
+        body = `✓ ${what} 기록 · ${fmtTime(ts)} (이 기기에만)\n⚠ 가족 연결이 끊겼어요 — 앱을 열어 다시 참여해 주세요`;
       } else {
         throw new Error(`HTTP ${r.status}`);
       }

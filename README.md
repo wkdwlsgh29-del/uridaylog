@@ -63,7 +63,8 @@ DATABASE_URL=postgresql://postgres@localhost:54329/babylog node dev-server.mjs  
 - **캘린더 서버 함수**: Supabase Edge Function `uriday-ics` (프로젝트 bmedbitonzkggfenymog, 공개·JWT 없음).
   소스는 `supabase/functions/uriday-ics/` — **`schedule-data.js` 등 일정 파일을 수정하면 이 함수도 재배포**해야
   웹과 캘린더 파일의 일정이 어긋나지 않는다 (함수에 저장소 원본 파일을 동봉해 배포하는 구조).
-- **함께 육아일지 서버 함수**: Supabase Edge Function `uriday-log` (같은 프로젝트 bmedbitonzkggfenymog, 공개·JWT 없음 —
+- **함께 육아일지 서버 함수**: Supabase Edge Function `uriday-log` — **육아 기록 전용 프로젝트**(무료 조직 `uridaylog`,
+  서울 리전; 보험 데이터가 있는 my-platform 과 분리). 공개·JWT 없음 —
   기기 토큰으로 인증). 비워 두면(`shared/js/brand.js` 의 `logEndpoint: ''`) 앱은 '이 기기만' 모드로 동작한다.
   배포 순서:
   1. 마이그레이션 먼저: `supabase/migrations/20260928000000_uriday_log.sql` (SQL Editor / `supabase db push`) —
@@ -71,9 +72,10 @@ DATABASE_URL=postgresql://postgres@localhost:54329/babylog node dev-server.mjs  
   2. `supabase/functions/uriday-log/` 의 **index.ts · handler.js · parse.js** 세 파일을 함께 업로드, `verify_jwt=false`.
      (dev-server.mjs · package.json · test/ 는 로컬 전용 — 올리지 않는다)
   3. Secrets: `SUPABASE_DB_URL` 은 Supabase 기본 제공. `BL_SALT`(선택)는 레이트 리밋용 IP 해시 salt — 긴 랜덤 문자열.
-  4. `shared/js/brand.js` 의 `logEndpoint` 를 `https://bmedbitonzkggfenymog.supabase.co/functions/v1/uriday-log` 로 바꾸고 push.
+  4. `shared/js/brand.js` 의 `logEndpoint` 를 `https://<육아일지 프로젝트 ref>.supabase.co/functions/v1/uriday-log` 로 바꾸고 push.
   5. (선택) 아이폰 잠금화면 단축어를 iCloud 링크로 배포하면 `brand.js` 의 `iosShortcuts` 에 종류별 링크를 넣는다
-     (가져오기 질문으로 '코드'=기기 토큰을 받는 단축어). 비워 두면 앱이 단축어를 직접 만드는 안내를 보여준다.
+     (가져오기 질문으로 '코드'=기록 전용 키를 받는 단축어 — 기기 토큰이 아니라 앱이 `quickkey` 로 받아 두는, 기록만 되는 키).
+     링크가 없는 종류와 🎙 말로 기록은 앱이 직접 만드는 안내를 함께 보여준다.
   - **handler.js · parse.js 를 고치면 함수도 재배포**해야 한다. 기록 종류를 늘릴 땐 `baby-log/log-data.js` 와
     `handler.js` 의 TYPES 를 함께 바꾼다 (서버가 모르는 종류는 거부된다).
   - `baby-log/sw.js` 의 `CACHE` 이름은 앱 파일 구성이 크게 바뀔 때만 올린다. 데이터 캐시 `uriday-bl-data`

@@ -96,6 +96,32 @@ const CASES = [
   ['1시간 반 전에 모유 왼쪽 10분', { type: 'breast', data: { side: 'L', min: 10 }, agoMin: 90 }],
   ['두 시간 전에 쉬했어', { type: 'pee', data: {}, agoMin: 120 }],
   ['방금 응가했어', { type: 'poop', data: {}, agoMin: 0 }],
+  // '소변 봤어'의 꼬리 '변 봤'을 대변으로 읽지 않는다
+  ['소변 봤어', { type: 'pee', data: {} }],
+  ['소변 봤어요', { type: 'pee', data: {} }],
+  ['소변봤어', { type: 'pee', data: {} }],
+  ['소변을 봤어', { type: 'pee', data: {} }],
+  ['대변 봤어', { type: 'poop', data: {} }],
+  ['변 봤어', { type: 'poop', data: {} }],
+  // 잠 끝 낱말 = 깼어요 (잠 시작이 아님), 부정은 잠 시작이 아님
+  ['잠 끝났어', { action: 'sleep_end' }],
+  ['낮잠 끝', { action: 'sleep_end' }],
+  ['낮잠 끝났어', { action: 'sleep_end' }],
+  ['잠 끝', { action: 'sleep_end' }],
+  ['다 잤어', { action: 'sleep_end' }],
+  ['수유 끝나고 잠들었어', { type: 'sleep', data: {} }],
+  ['잠 안 자', null],
+  ['못 잤어', null],
+  // 흰 알갱이 섞인 노란 변(정상)·옅은 노란색은 흰색 변(급함)이 아니다 — 다른 색 낱말이 먼저
+  ['응가 옅은 노란색', { type: 'poop', data: { color: 'yellow' } }],
+  ['응가 흰 우유 덩어리 섞인 노란색', { type: 'poop', data: { color: 'yellow' } }],
+  ['대변 노란데 하얀 알갱이', { type: 'poop', data: { color: 'yellow' } }],
+  ['응가 초록색 흰 몽글이', { type: 'poop', data: { color: 'green' } }],
+  ['응가 옅은 갈색', { type: 'poop', data: { color: 'brown' } }],
+  ['하얀 똥', { type: 'poop', data: { color: 'pale' } }],
+  ['응가 회색인데 노란 것도', { type: 'poop', data: { color: 'pale' } }],
+  // 생우유는 늘 우유 (그냥 '우유'는 나이를 모르면 분유 — 아래 따로)
+  ['생우유 180', { type: 'milk', data: { ml: 180 } }],
   // 못 알아듣는 말
   ['오늘 날씨 좋다', null],
   ['', null],
@@ -139,4 +165,15 @@ test('koNumber: 한글 수사', () => {
   assert.equal(koNumber('오'), 5);
   assert.equal(koNumber('이이'), null);
   assert.equal(koNumber('십백'), null);
+});
+
+test('parseSay: 우유 — 돌(365일) 이후엔 우유(milk), 돌 전·나이 모름은 분유 (분유·맘마·젖병이란 말이 있으면 분유)', () => {
+  assert.deepEqual(parseSay('우유 200'), { type: 'formula', data: { ml: 200 } });
+  assert.deepEqual(parseSay('우유 200', { ageDays: 200 }), { type: 'formula', data: { ml: 200 } });
+  assert.deepEqual(parseSay('우유 200', { ageDays: 365 }), { type: 'milk', data: { ml: 200 } });
+  assert.deepEqual(parseSay('우유 200 마셨어', { ageDays: 480 }), { type: 'milk', data: { ml: 200 } });
+  assert.deepEqual(parseSay('밀크 150', { ageDays: 480 }), { type: 'milk', data: { ml: 150 } });
+  assert.deepEqual(parseSay('분유 우유 180', { ageDays: 480 }), { type: 'formula', data: { ml: 180 } });
+  assert.deepEqual(parseSay('젖병으로 우유 120', { ageDays: 480 }), { type: 'formula', data: { ml: 120 } });
+  assert.deepEqual(parseSay('생우유 100', { ageDays: 100 }), { type: 'milk', data: { ml: 100 } });
 });

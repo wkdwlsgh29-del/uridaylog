@@ -479,11 +479,81 @@ test('hints: 3개월 미만 38℃ urgent, 흰 변 urgent, 급한 것 먼저', ()
   assert.ok(hs.some((h) => h.id === 'fever' && h.level === 'urgent' && h.link === '../fever/'));
   assert.ok(hs.some((h) => h.id === 'poop-color' && h.level === 'urgent'));
   assert.ok(hs.some((h) => h.id === 'water-early'));
-  // 나중에 잰 체온이 정상이면 안내 없음
-  assert.ok(!L.hints(stage('hundred'), [ev('temp', at(9), { c: 38.3 }), ev('temp', at(11), { c: 37.2 })], now, fam).some((h) => h.id === 'fever'));
-  // 4개월이면 38℃ 는 info
+  // 4개월이면 38℃ 는 info, 나중에 잰 체온이 정상이면 안내 없음
   const older = L.hints(stage('rolling'), [ev('temp', at(11), { c: 38.3 })], now, { birth: birthFor(130, now) });
   assert.equal(older.find((h) => h.id === 'fever').level, 'info');
+  assert.ok(!L.hints(stage('rolling'), [ev('temp', at(9), { c: 38.3 }), ev('temp', at(11), { c: 37.2 })], now, { birth: birthFor(130, now) }).some((h) => h.id === 'fever'));
+});
+
+test('hints: 3개월 미만 발열은 다시 재서 정상이어도·자정이 지나 90일이 돼도 urgent 로 남는다 (그때 시각과 체온)', () => {
+  // 생후 3일: 09:00 38.5 → 11:00 37.8 → 12:00 에도 urgent
+  const now = at(12);
+  const fam = { birth: birthFor(3, now) };
+  const hs = L.hints(stage('newborn'), [ev('temp', at(9), { c: 38.5 }), ev('temp', at(11), { c: 37.8 })], now, fam);
+  const fv = hs.find((h) => h.id === 'fever');
+  assert.equal(fv?.level, 'urgent');
+  assert.match(fv.text, /^오전 9:00 38\.5℃ — /);
+  assert.equal(hs[0].id, 'fever');
+  // 생일 7/1: 9/28 23:30(생후 89일) 38.4 → 9/29 00:30(90일)에도 urgent
+  const b = { birth: '2026-07-01' };
+  const t = [ev('temp', at(23, 30, 28), { c: 38.4 })];
+  assert.equal(L.hints(stage('hundred'), t, at(23, 40, 28), b).find((h) => h.id === 'fever').level, 'urgent');
+  assert.equal(L.hints(stage('hundred'), t, at(0, 30, 29), b).find((h) => h.id === 'fever').level, 'urgent');
+  // 24시간이 지나면 없음
+  assert.ok(!L.hints(stage('hundred'), t, at(0, 0, 30), b).some((h) => h.id === 'fever'));
+});
+
+test('hints: 흰색·빨간 변 경고는 뒤에 정상 색 변이 나와도 48시간 동안 남는다 · 태변은 그 변을 본 날의 나이로', () => {
+  const now = at(12);
+  const fam = { birth: birthFor(20, now) };
+  const pc = (evs) => L.hints(stage('newborn'), evs, now, fam).find((h) => h.id === 'poop-color');
+  let h = pc([ev('poop', at(9), { color: 'pale' }), ev('poop', at(11), { color: 'yellow' })]);
+  assert.equal(h?.level, 'urgent');
+  assert.match(h.text, /^오전 9:00 대변 — /);
+  assert.equal(pc([ev('poop', at(9), { color: 'pale' }), ev('poop', at(11), { color: 'green' })])?.level, 'urgent', '초록(안심 안내)으로 바뀌지 않음');
+  assert.equal(pc([ev('poop', at(9), { color: 'red' }), ev('poop', at(11), { color: 'yellow' })])?.level, 'check');
+  assert.equal(pc([ev('poop', at(11), { color: 'green' })])?.level, 'info');
+  assert.equal(pc([ev('poop', at(11), { color: 'yellow' })]), undefined);
+  assert.equal(pc([ev('poop', at(9, 0, 26), { color: 'pale' }), ev('poop', at(11), { color: 'yellow' })]), undefined, '48시간 지나면 없음');
+  // 생일 9/25, 9/28 23:00(생후 3일) 검은 변 → 9/29 01:00(4일)에도 태변 안내(info), 교대 요약에 ⚠ 없음
+  const b = { name: '하린', birth: '2026-09-25' };
+  const blk = [ev('poop', at(23, 0, 28), { color: 'black' })];
+  assert.equal(L.hints(stage('newborn'), blk, at(23, 30, 28), b).find((x) => x.id === 'poop-color').level, 'info');
+  const next = L.hints(stage('newborn'), blk, at(1, 0, 29), b).find((x) => x.id === 'poop-color');
+  assert.equal(next.level, 'info');
+  assert.match(next.text, /태변/);
+  const txt = L.handoffText({ family: b, events: blk, from: at(20, 0, 28), to: at(1, 0, 29), now: at(1, 0, 29) });
+  assert.ok(!/⚠ 대변 색/.test(txt), txt);
+  // 생후 5일에 본 검은 변은 check
+  assert.equal(L.hints(stage('newborn'), [ev('poop', at(9, 0, 30), { color: 'black' })], at(10, 0, 30), b).find((x) => x.id === 'poop-color').level, 'check');
+});
+
+test('statsBetween: 겹치는 잠 기록(두 기기가 따로 재우기)은 아기 잠 하나로 센다', () => {
+  const evs = [ev('sleep', at(13, 0), { end: at(15, 0) }), ev('sleep', at(13, 1), { end: at(15, 0) }), ev('sleep', at(16, 0), { end: at(16, 30) })];
+  const s = L.statsBetween(evs, at(0), at(0, 0, 29));
+  assert.equal(s.sleepMin, 150);
+  assert.equal(s.sleeps, 2);
+  // 부분 겹침은 합친 길이
+  const s2 = L.statsBetween([ev('sleep', at(1, 0), { end: at(2, 0) }), ev('sleep', at(1, 30), { end: at(3, 0) })], at(0), at(0, 0, 29));
+  assert.equal(s2.sleepMin, 120);
+  assert.equal(s2.sleeps, 1);
+  const txt = L.handoffText({ family: { name: '하린', birth: '2026-07-01' }, events: evs, from: at(9), to: at(17), now: at(17) });
+  assert.ok(txt.includes('잠: 2번 · 총 2시간 30분'), txt);
+});
+
+test('handoffText: 트림 버튼으로 남긴 트림도 마지막 수유의 트림 O · 기록에 붙인 메모도 특이사항에', () => {
+  const fam = { name: '하린', birth: '2026-09-01' };
+  const events = [ev('formula', at(12, 30), { ml: 80 }), ev('burp', at(12, 40))];
+  const full = L.handoffText({ family: fam, events, from: at(9), to: at(14), now: at(14) });
+  assert.ok(full.includes('(마지막 오후 12:30 · 분유 80ml · 트림 O)'), full);
+  const short = L.handoffText({ family: fam, events, from: at(12), to: at(14), now: at(14) });
+  assert.ok(short.includes('마지막 수유 12:30 · 분유 80ml · 트림 O'), short);
+  // 트림 기록이 수유보다 앞이면 아님
+  const before = L.handoffText({ family: fam, events: [ev('burp', at(12, 20)), ev('formula', at(12, 30), { ml: 80 })], from: at(9), to: at(14), now: at(14) });
+  assert.ok(!before.includes('트림 O'), before);
+  // 메모
+  const noted = L.handoffText({ family: fam, events: [ev('formula', at(11), { ml: 100, note: '먹고 조금 토했어요' }), ev('note', at(12), { text: '분유 1통 남음' })], from: at(9), to: at(14), now: at(14) });
+  assert.ok(noted.includes('특이사항: 오전 11:00 분유: 먹고 조금 토했어요 / 분유 1통 남음'), noted);
 });
 
 test('hints: 소변 기저귀 적음은 기록이 꾸준할 때만 (24시간 8개 이상 + 첫 기록이 24시간보다 오래됨)', () => {

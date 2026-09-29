@@ -535,9 +535,15 @@ test('관리자 전용 403 · 나 자신 내보내기 금지 · 내보낸 사람
     assert.equal((await quick({ k, t: 'pee' })).status, 401);
     assert.equal((await api({ a: 'leave', k })).status, 401);
   }
-  const p = await api({ a: 'peek', invite: invite3 });
+  // 내보내면 초대 코드도 바뀐다 → 내보낸 사람이 갖고 있던 옛 링크로 '새 사람'이 되어 다시 들어올 수 없음
+  const invite4 = r.json.invite;
+  assert.match(invite4, /^[0-9A-HJKMNP-TV-Z]{16}$/);
+  assert.notEqual(invite4, invite3);
+  assert.equal((await api({ a: 'peek', invite: invite3 })).status, 404);
+  assert.equal((await api({ a: 'join', invite: invite3, me: { name: '아빠', role: 'dad' } })).status, 404);
+  const p = await api({ a: 'peek', invite: invite4 });
   assert.ok(!p.json.members.some((m) => m.id === f.dad.id));
-  r = await api({ a: 'join', invite: invite3, claim: f.dad.id });
+  r = await api({ a: 'join', invite: invite4, claim: f.dad.id });
   assert.equal(r.status, 403);
   assert.equal((await api({ a: 'remove', k: f.momToken, memberId: uuid() })).status, 400);
   // 내보낸 사람의 옛 기록 by 는 그대로 받아 준다
@@ -545,7 +551,7 @@ test('관리자 전용 403 · 나 자신 내보내기 금지 · 내보낸 사람
   r = await sync(f.momToken, 0, { push: [old] });
   assert.equal(r.json.events.find((e) => e.id === old.id).by, f.dad.id);
   // leave: 이 기기만 끊김
-  const aunt = await api({ a: 'join', invite: invite3, me: { name: '이모', role: 'other' } });
+  const aunt = await api({ a: 'join', invite: invite4, me: { name: '이모', role: 'other' } });
   const auntToken = aunt.json.token;
   r = await api({ a: 'leave', k: auntToken });
   assert.deepEqual(r.json, { ok: true });
@@ -907,12 +913,27 @@ test('quick: say(받아쓰기) 해석', async () => {
   assert.match(r.text, /^✓ 잠 시작/);
   r = await say('잠들었어');
   assert.equal(r.status, 409);
-  assert.match(r.text, /이미 재우는 중/);
+  assert.match(r.text, /^⚠ 이미 재우는 중/, '기록 안 됨 — 성공(✓)처럼 보이지 않게');
   clock += 72 * MIN;
   r = await say('깼어');
   assert.match(r.text, /^✓ 잠 끝 \(1시간 12분\).*\n😴 1시간 12분 잤어요$/);
   r = await say('깼어');
   assert.equal(r.status, 409);
+  assert.match(r.text, /^⚠ 진행 중인 잠 기록이 없어요/);
+  // 잠 끝 낱말 ('잠 끝났어' · '낮잠 끝' · '다 잤어') = 깼어요 — 잠 시작이 아님
+  r = await say('낮잠 끝');
+  assert.equal(r.status, 409, '열린 잠이 없으면 새 잠을 시작하지 않는다');
+  await say('잠들었어');
+  clock += 30 * MIN;
+  r = await say('잠 끝났어');
+  assert.match(r.text, /^✓ 잠 끝 \(30분\)/);
+  // '소변 봤어' = 소변 한 건 (대변 아님)
+  r = await say('소변 봤어요');
+  assert.match(r.text, /^✓ 소변 기록/);
+  // 노란 변의 흰 알갱이(정상)를 흰색 변으로 읽지 않는다
+  r = await say('응가 노란데 하얀 알갱이');
+  assert.match(r.text, /^✓ 대변\(노랑\) 기록/);
+  assert.ok(!/⚠️/.test(r.text));
   // 알아듣지 못함 → 400 + 들은 말
   r = await say('오늘 날씨 좋다');
   assert.equal(r.status, 400);
@@ -1010,4 +1031,227 @@ test('동시성: 20개 동시 sync 푸시 중 폴링하는 커서가 기록을 �
     assert.deepEqual(polls.flatMap((p) => p.revs), dbRevs);
     assert.ok(polls.length > 2, `폴링 ${polls.length}회`);
   }
+});
+
+// ── 리뷰 수정분 ────────────────────────────────────────────────────────────
+test('quickkey: 잠금화면 주소용 기록 전용 키 — quick 만 되고 sync·관리 동작은 401, 새로 만들면 옛 키 멈춤, 기기 끊기면 같이 멈춤', async () => {
+  clock = T0;
+  const f = await makeFamily();
+  let r = await api({ a: 'quickkey', k: f.momToken });
+  assert.equal(r.status, 200, r.text);
+  const q1 = r.json.quick;
+  assert.match(q1, /^[A-Za-z0-9_-]{43}$/);
+  assert.notEqual(q1, f.momToken);
+  // 기록은 된다 (그 기기의 사람으로)
+  r = await quick({ k: q1, t: 'pee' });
+  assert.equal(r.status, 200, r.text);
+  assert.match(r.text, /^✓ 소변 기록 · 오후 2:32 · 엄마/);
+  // 본문(form)·x-bl-key 헤더로 보내도 된다 (주소에 키를 안 싣는 방법)
+  r = await quick({}, { query: 'a=q&t=poop', body: `k=${q1}`, contentType: 'application/x-www-form-urlencoded' });
+  assert.equal(r.status, 200, r.text);
+  r = await quick({}, { query: 'a=q&t=pee', headers: { 'x-bl-key': q1 } });
+  assert.equal(r.status, 200, r.text);
+  // 전체 기록 읽기·초대·기기 연결·관리·키 발급은 안 된다
+  for (const body of [{ a: 'sync', since: 0 }, { a: 'invite' }, { a: 'devlink' }, { a: 'quickkey' }, { a: 'signout' },
+    { a: 'remove', memberId: f.dad.id }, { a: 'unlink', memberId: f.dad.id }, { a: 'admin', memberId: f.dad.id, on: true }, { a: 'leave' }]) {
+    assert.equal((await api({ ...body, k: q1 })).status, 401, JSON.stringify(body));
+  }
+  // 새로 만들면 옛 키는 멈춤
+  const q2 = (await api({ a: 'quickkey', k: f.momToken })).json.quick;
+  assert.equal((await quick({ k: q1, t: 'pee' })).status, 401);
+  assert.equal((await quick({ k: q2, t: 'pee' })).status, 200);
+  // 그 기기의 공유를 끊으면 기록 전용 키도 멈춤
+  await api({ a: 'leave', k: f.momToken });
+  assert.equal((await quick({ k: q2, t: 'pee' })).status, 401);
+});
+
+test('signout: 내 다른 기기 연결만 모두 끊기 (이 기기·다른 사람은 그대로)', async () => {
+  clock = T0;
+  const f = await makeFamily();
+  const dadToken = await joinAs(f.invite, f.dad.id);
+  const mom2 = await linkDevice(f.momToken);
+  const mom3 = await linkDevice(mom2);
+  const pending = (await api({ a: 'devlink', k: mom2 })).json.code;
+  const r = await api({ a: 'signout', k: mom2 });
+  assert.equal(r.status, 200, r.text);
+  assert.equal(r.json.members.find((m) => m.id === f.mom.id).claimed, true);
+  assert.equal((await sync(mom2, 0)).status, 200, '이 기기는 그대로');
+  assert.equal((await sync(f.momToken, 0)).status, 401);
+  assert.equal((await sync(mom3, 0)).status, 401);
+  assert.equal((await sync(dadToken, 0)).status, 200, '다른 사람은 그대로');
+  assert.equal((await api({ a: 'join', device: pending })).status, 404, '만들어 둔 연결 코드도 지움');
+});
+
+test('join nonce: 응답이 끊겨 같은 참여를 다시 보내면 같은 자리로 이어 준다 (자리 중복·403 없음)', async () => {
+  clock = T0;
+  const f = await makeFamily();
+  const nonce = 'n0nce-' + 'x'.repeat(20);
+  // ① 새 사람: 같은 me.id + nonce 로 두 번 → 구성원 하나, 두 번째 응답의 토큰만 살아 있음
+  const me = { id: uuid(), name: '이모님', role: 'sitter' };
+  const a1 = await api({ a: 'join', invite: f.invite, me, nonce });
+  const a2 = await api({ a: 'join', invite: f.invite, me, nonce });
+  assert.equal(a1.status, 200, a1.text);
+  assert.equal(a2.status, 200, a2.text);
+  assert.equal(a2.json.me.memberId, me.id);
+  assert.notEqual(a2.json.token, a1.json.token);
+  assert.equal(a2.json.members.filter((m) => m.name === '이모님').length, 1);
+  assert.equal((await sync(a1.json.token, 0)).status, 401, '아무도 못 받은 첫 토큰은 바뀜');
+  assert.equal((await sync(a2.json.token, 0)).status, 200);
+  // ② 자리 차지(claim): 두 번째도 200 (403 '이미 쓰는 사람' 아님)
+  const n2 = 'second-nonce-' + 'y'.repeat(10);
+  const c1 = await api({ a: 'join', invite: f.invite, claim: f.dad.id, nonce: n2 });
+  const c2 = await api({ a: 'join', invite: f.invite, claim: f.dad.id, nonce: n2 });
+  assert.equal(c1.status, 200, c1.text);
+  assert.equal(c2.status, 200, c2.text);
+  assert.equal(c2.json.me.memberId, f.dad.id);
+  // nonce 가 다르면(다른 기기) 여전히 403
+  assert.equal((await api({ a: 'join', invite: f.invite, claim: f.dad.id, nonce: 'other-nonce-zzzzzzzz' })).status, 403);
+  // ③ 기기 연결 코드: 이미 쓴 코드라도 같은 nonce 면 이어 준다, 다른 nonce 면 404
+  const code = (await api({ a: 'devlink', k: c2.json.token })).json.code;
+  const n3 = 'device-nonce-' + 'z'.repeat(10);
+  const d1 = await api({ a: 'join', device: code, nonce: n3 });
+  const d2 = await api({ a: 'join', device: code, nonce: n3 });
+  assert.equal(d1.status, 200, d1.text);
+  assert.equal(d2.status, 200, d2.text);
+  assert.equal(d2.json.me.memberId, f.dad.id);
+  assert.equal((await api({ a: 'join', device: code, nonce: 'another-nonce-aaaaaa' })).status, 404);
+  assert.equal((await api({ a: 'join', device: code })).status, 404);
+  // ④ 같은 nonce 로 다른 자리를 고르면: 아무도 못 받은 옛 기기는 끊고 새 자리로
+  const gma = { id: uuid(), name: '할머니', role: 'grandma', emoji: '👵', updatedAt: clock };
+  await sync(f.momToken, 0, { members: [gma] });
+  const n4 = 'switch-nonce-' + 'w'.repeat(10);
+  const s1 = await api({ a: 'join', invite: f.invite, me: { id: uuid(), name: '새 사람', role: 'other' }, nonce: n4 });
+  const s2 = await api({ a: 'join', invite: f.invite, claim: gma.id, nonce: n4 });
+  assert.equal(s2.status, 200, s2.text);
+  assert.equal((await sync(s1.json.token, 0)).status, 401);
+  // 잘못된 nonce 는 무시(보통 참여)
+  assert.equal((await api({ a: 'join', invite: f.invite, me: { name: '가족', role: 'other' }, nonce: 'short' })).status, 200);
+});
+
+test('updatedAt 은 서버 시각 + 10분까지로 잘린다 — 먼 미래 값으로 기록·프로필·아기 정보를 잠가도 다른 기기가 고칠 수 있다', async () => {
+  clock = T0;
+  const f = await makeFamily();
+  const dadToken = await joinAs(f.invite, f.dad.id);
+  const FAR = 4102444800000; // 2100-01-01
+  const e = ev('pee', {}, { updatedAt: FAR });
+  let r = await sync(dadToken, 0, {
+    push: [e],
+    members: [{ ...f.mom, name: '바보', updatedAt: FAR * 3 }],
+    family: { name: '잠금', updatedAt: FAR },
+  });
+  assert.equal(r.status, 200, r.text);
+  assert.deepEqual(r.json.rejected, []);
+  const got = r.json.events.find((x) => x.id === e.id);
+  assert.equal(got.updatedAt, T0 + 10 * MIN, '잘린 값을 돌려준다');
+  assert.equal(r.json.members.find((m) => m.id === f.mom.id).updatedAt, T0 + 10 * MIN);
+  assert.equal(r.json.family.updatedAt, T0 + 10 * MIN);
+  // 엄마 기기: (조금 뒤) 받은 값 +1 로 고치면 이긴다
+  clock += MIN;
+  const fix = T0 + 10 * MIN + 1;
+  r = await sync(f.momToken, 0, {
+    push: [{ ...e, deleted: true, updatedAt: fix }],
+    members: [{ ...f.mom, updatedAt: fix }],
+    family: { name: '하린', updatedAt: fix },
+  });
+  assert.equal(r.status, 200, r.text);
+  assert.equal(r.json.events.find((x) => x.id === e.id).deleted, true);
+  assert.equal(r.json.members.find((m) => m.id === f.mom.id).name, '엄마');
+  assert.equal(r.json.family.name, '하린');
+  // 너무 이른 값은 여전히 거부
+  const old = ev('pee', {}, { updatedAt: 1000 });
+  r = await sync(f.momToken, 0, { push: [old] });
+  assert.deepEqual(r.json.rejected, [old.id]);
+});
+
+test('관리자 자리: 기기 연결 해제(unlink)하면 관리자 권한도 해제 · 공유 끊기(leave)는 다른 관리자가 있을 때만 해제', async () => {
+  clock = T0;
+  const f = await makeFamily();
+  const dadToken = await joinAs(f.invite, f.dad.id);
+  await api({ a: 'admin', k: f.momToken, memberId: f.dad.id, on: true });
+  // 아빠 폰 분실 → 엄마가 연결 해제 → 아빠 자리는 관리자가 아님 (초대 링크로 누가 먼저 차지해도 관리자가 안 됨)
+  let r = await api({ a: 'unlink', k: f.momToken, memberId: f.dad.id });
+  assert.equal(r.status, 200, r.text);
+  assert.equal(r.json.members.find((m) => m.id === f.dad.id).isAdmin, false);
+  assert.equal((await sync(dadToken, 0)).status, 401);
+  const j = await api({ a: 'join', invite: f.invite, claim: f.dad.id });
+  assert.equal(j.json.me.isAdmin, false);
+  assert.equal((await api({ a: 'invite', k: j.json.token })).status, 403);
+  // 관리자 둘일 때 한 명이 마지막 기기에서 공유 끊기 → 그 자리는 관리자 해제
+  await api({ a: 'admin', k: f.momToken, memberId: f.dad.id, on: true });
+  await api({ a: 'leave', k: j.json.token });
+  r = await sync(f.momToken, 0);
+  assert.equal(r.json.members.find((m) => m.id === f.dad.id).isAdmin, false);
+  // 관리자가 혼자면 끊어도 유지 (가족에 관리자가 없어지지 않게)
+  await api({ a: 'leave', k: f.momToken });
+  const g = await makeFamily();
+  await api({ a: 'leave', k: g.momToken });
+  const p = await api({ a: 'join', invite: g.invite, claim: g.mom.id });
+  assert.equal(p.json.me.isAdmin, true);
+});
+
+test('quick: 끝나지 않은 잠이 둘이면 깼어요는 둘 다 끝내고 가장 먼저 잠든 때부터 잰다', async () => {
+  clock = Date.UTC(2026, 8, 28, 4, 0); // 13:00 KST
+  const f = await makeFamily();
+  const k = f.momToken;
+  // 엄마 앱 13:00 '재우기'(아직 못 보냄) + 아빠 단축어 13:02 → 서버에 열린 잠 둘
+  const appSleep = ev('sleep', {}, { ts: clock, updatedAt: clock });
+  clock += 2 * MIN;
+  let r = await quick({ k, t: 'sleep' });
+  assert.match(r.text, /^✓ 잠 시작/);
+  await sync(k, 0, { push: [appSleep] });
+  clock = Date.UTC(2026, 8, 28, 5, 30); // 14:30
+  r = await quick({ k, t: 'sleep' });
+  assert.equal(r.text, '✓ 잠 끝 (1시간 30분) · 오후 2:30 · 엄마\n😴 1시간 30분 잤어요');
+  const sleeps = [...(await pullAll(k)).values()].filter((e) => e.type === 'sleep');
+  assert.equal(sleeps.length, 2);
+  assert.ok(sleeps.every((e) => e.data.end === clock), '둘 다 끝남');
+  // 다음 탭은 새 잠 시작
+  clock = Date.UTC(2026, 8, 28, 6, 0);
+  r = await quick({ k, t: 'sleep' });
+  assert.match(r.text, /^✓ 잠 시작/);
+});
+
+test('quick: 트림을 수유에 붙인 요청의 id 를 남긴다 (응답 유실 → 알림 수신함 재전송이 중복 트림이 되지 않게) · 자정 넘긴 트림 횟수', async () => {
+  clock = Date.UTC(2026, 8, 28, 14, 30); // 23:30 KST
+  const f = await makeFamily();
+  const k = f.momToken;
+  await quick({ k, t: 'formula', ml: 100 });
+  clock = Date.UTC(2026, 8, 28, 15, 5); // 다음날 00:05 KST
+  const id = uuid();
+  const ts = clock;
+  let r = await quick({ k, t: 'burp', src: 'notif', id, ts });
+  assert.equal(r.text, '✓ 트림 기록 · 오전 12:05 · 엄마\n9/28 트림 1번째 · 오후 11:30 분유에 표시');
+  // 같은 id 로 다시 (응답을 못 받은 서비스워커가 한 번 더 / 수신함)
+  r = await quick({ k, t: 'burp', src: 'notif', id, ts });
+  assert.match(r.text, /^✓ 이미 기록돼 있어요/);
+  // 앱이 수신함에서 가져와 같은 id 의 트림을 올려도(updatedAt = 탭 시각) 서버 툼스톤이 이긴다
+  clock += MIN;
+  r = await sync(k, 0, { push: [{ id, type: 'burp', ts, by: f.mom.id, data: { src: 'notif' }, deleted: false, updatedAt: ts }] });
+  const burpRow = r.json.events.find((e) => e.id === id);
+  assert.equal(burpRow.deleted, true);
+  const alive = r.json.events.filter((e) => !e.deleted);
+  assert.equal(alive.filter((e) => e.type === 'burp').length, 0);
+  assert.equal(alive.find((e) => e.type === 'formula').data.burp, 'yes');
+});
+
+test('quick say: "우유" 는 돌 이후엔 우유(milk), 돌 전엔 분유 · "생우유" 는 늘 우유', async () => {
+  clock = T0;
+  const baby = await makeFamily(); // 2026-09-05 생 (23일)
+  let r = await quick({ k: baby.momToken, t: 'say', say: '우유 120' });
+  assert.match(r.text, /^✓ 분유 120ml 기록/);
+  const toddler = await api({
+    a: 'create', family: { name: '도윤', birth: '2025-06-01', updatedAt: clock },
+    members: [{ id: uuid(), name: '엄마', role: 'mom', emoji: '👩', updatedAt: clock }], events: [],
+    meId: undefined,
+  });
+  assert.equal(toddler.status, 400); // meId 없음
+  const mom = { id: uuid(), name: '엄마', role: 'mom', emoji: '👩', updatedAt: clock };
+  const t2 = await api({ a: 'create', family: { name: '도윤', birth: '2025-06-01', updatedAt: clock }, members: [mom], meId: mom.id, events: [] });
+  r = await quick({ k: t2.json.token, t: 'say', say: '우유 200 마셨어' });
+  assert.equal(r.status, 200, r.text);
+  assert.match(r.text, /^✓ 우유 200ml 기록 · 오후 2:32 · 엄마\n오늘 우유 1번째$/);
+  r = await quick({ k: t2.json.token, t: 'say', say: '분유 180' });
+  assert.match(r.text, /^✓ 분유 180ml 기록/);
+  r = await quick({ k: baby.momToken, t: 'say', say: '생우유 100' });
+  assert.match(r.text, /^✓ 우유 100ml 기록/);
 });

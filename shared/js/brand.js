@@ -9,11 +9,12 @@ export const BRAND = {
   icsEndpoint: 'https://bmedbitonzkggfenymog.supabase.co/functions/v1/uriday-ics',
   // 함께 육아일지(baby-log) 가족 공유 서버 함수 (Supabase Edge Function 'uriday-log').
   // 비우면 '이 기기만' 모드 — 기록은 브라우저에만 저장되고 가족 초대·잠금화면 단축어 주소는 "곧 열려요"로 보인다.
-  // 배포 후 넣을 값: 'https://bmedbitonzkggfenymog.supabase.co/functions/v1/uriday-log' (README 참고)
+  // 배포 후 넣을 값: 'https://<육아일지 전용 프로젝트 ref>.supabase.co/functions/v1/uriday-log' (README 참고)
   logEndpoint: '',
   // 아이폰 잠금화면 기록용 '단축어' iCloud 공유 링크 (종류별 1개, https://www.icloud.com/shortcuts/…).
-  // 각 단축어는 가져올 때 '코드'(가족 공유 기기 토큰)를 묻는 가져오기 질문을 넣어 만든다 (RESEARCH D).
-  // 링크가 있으면 잠금화면 안내에 [내 코드 복사] + [○○ 버튼 받기] 버튼이, 비어 있으면 직접 만드는 안내가 보인다.
+  // 각 단축어는 가져올 때 '코드'(가족 공유 '기록 전용 키' — 기기 토큰 아님, 기록 한 건만 됨)를 묻는 가져오기 질문을 넣어 만든다 (RESEARCH D).
+  // 종류별로: 링크가 있으면 잠금화면 안내에 [내 코드 복사] + [○○ 버튼 받기] 버튼이, 비어 있으면 직접 만드는 주소·안내가 보인다
+  // (🎙 말로 기록은 늘 직접 만드는 안내).
   iosShortcuts: {
     pee: '',      // 💧 소변 기록
     poop: '',     // 💩 대변 기록
