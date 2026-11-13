@@ -1,0 +1,131 @@
+/* 산후조리원 가격 비교 전용 스타일 */
+
+.top { display: flex; align-items: center; justify-content: space-between; padding: 18px 0 6px; }
+.brand-mark { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 17px; }
+.brand-mark .logo {
+  width: 34px; height: 34px; display: grid; place-items: center;
+  background: linear-gradient(135deg, #F3E8FB, #E9D8F6);
+  border-radius: 12px; font-size: 18px;
+}
+.top a { text-decoration: none; }
+
+.hero { padding: 26px 0 22px; }
+.hero h1 { font-size: 30px; line-height: 1.28; font-weight: 800; letter-spacing: -0.02em; }
+.hero h1 em { font-style: normal; color: var(--brand-deep); background: linear-gradient(transparent 65%, var(--brand-soft) 65%); }
+.hero .sub { margin-top: 12px; color: var(--ink-soft); font-size: 15.5px; }
+
+.optional-tag { font-weight: 500; color: var(--ink-faint); }
+.gap-top { margin-top: 14px; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.three-col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.two-col > div, .three-col > div { min-width: 0; }
+.hint { margin-top: 6px; font-size: 12px; color: var(--ink-faint); }
+
+/* ---------- 입력 폼 ---------- */
+.input-card { padding: 22px 20px; margin-top: 20px; scroll-margin-top: 12px; }
+.input-card h2 { font-size: 18px; font-weight: 800; margin-bottom: 14px; }
+.input-card .btn { width: 100%; margin-top: 18px; padding: 16px; font-size: 17px; }
+.input-card .btn-ghost { margin-top: 10px; padding: 13px; font-size: 15px; }
+select.field {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%237A6A5D' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 14px center; padding-right: 34px;
+}
+.link-btn {
+  display: block; width: 100%; margin-top: 14px; padding: 6px;
+  font-size: 13px; font-weight: 600; color: var(--ink-soft); text-decoration: underline; text-underline-offset: 3px;
+}
+
+.feature-row, .preset-row { display: flex; flex-wrap: wrap; gap: 7px; }
+.toggle {
+  font-size: 13px; font-weight: 700; padding: 8px 12px;
+  border-radius: var(--radius-pill); border: 1.5px solid var(--line);
+  background: var(--surface); color: var(--ink-soft);
+  -webkit-tap-highlight-color: transparent;
+}
+.toggle.on { background: var(--brand-soft); border-color: var(--brand); color: var(--brand-deep); }
+
+/* ---------- 지원금 ---------- */
+.support-card { padding: 18px 20px; }
+.support-card .field { margin-top: 10px; }
+
+/* ---------- 순위 ---------- */
+.rank-card { margin-top: 14px; padding: 20px; }
+.rank-card h3 { font-size: 16px; font-weight: 800; }
+.rank-sub { font-size: 12.5px; color: var(--ink-faint); margin-top: 2px; }
+.rank-rows { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
+.rank-top { display: flex; align-items: baseline; gap: 8px; }
+.rank-name { font-weight: 700; font-size: 14.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rank-amt { margin-left: auto; font-weight: 800; font-size: 15.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rank-bar { margin-top: 6px; height: 10px; border-radius: 99px; background: var(--line-soft); overflow: hidden; }
+.rank-bar i { display: block; height: 100%; border-radius: 99px; background: #E3D5C6; }
+.rank-row.best .rank-bar i { background: linear-gradient(90deg, var(--brand), var(--brand-deep)); }
+.rank-row.best .rank-amt { color: var(--brand-deep); }
+.rank-diff { margin-top: 4px; font-size: 12px; color: var(--ink-soft); }
+.avg-note {
+  margin-top: 16px; padding: 11px 13px; border-radius: var(--radius-sm);
+  background: var(--surface-warm); border: 1px solid var(--line);
+  font-size: 12.5px; color: var(--ink-soft); line-height: 1.6;
+}
+.avg-note b { color: var(--ink); }
+
+/* ---------- 조리원 카드 ---------- */
+.center-card { margin-top: 14px; padding: 20px; }
+.center-card.best { border-color: #F2C4B5; box-shadow: var(--shadow-md); }
+.c-head { display: flex; align-items: flex-start; gap: 8px; }
+.c-title { flex: 1; min-width: 0; }
+.c-name { font-size: 17px; font-weight: 800; overflow-wrap: anywhere; }
+.c-meta { font-size: 12.5px; color: var(--ink-faint); margin-top: 2px; }
+.c-total-box {
+  margin-top: 12px; display: flex; align-items: center; gap: 14px;
+  background: var(--brand-softer); border: 1px solid #F5DDD0;
+  border-radius: var(--radius-sm); padding: 14px 16px;
+}
+.c-total { font-size: 26px; font-weight: 800; color: var(--brand-deep); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.c-total small { font-size: 14px; font-weight: 700; }
+.c-total-detail { font-size: 12.5px; color: var(--ink-soft); line-height: 1.55; }
+.c-lines { margin-top: 12px; }
+.c-line { display: flex; justify-content: space-between; gap: 10px; font-size: 13.5px; padding: 5px 0; color: var(--ink-soft); }
+.c-line span:last-child { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.c-line.minus span:last-child { color: var(--sage-deep); }
+.c-line.sum { margin-top: 4px; padding-top: 9px; border-top: 1px dashed var(--line); font-weight: 700; color: var(--ink); }
+.c-chips { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+.c-memo { margin-top: 10px; font-size: 12.5px; color: var(--ink-soft); overflow-wrap: anywhere; }
+.c-btns { margin-top: 12px; display: flex; gap: 8px; }
+.c-btns button {
+  flex: 1; padding: 10px; border-radius: var(--radius-sm);
+  font-size: 13px; font-weight: 700; background: var(--line-soft); color: var(--ink-soft);
+}
+
+/* ---------- 포함 항목 매트릭스 ---------- */
+.matrix-card { margin-top: 14px; padding: 20px 0 14px; }
+.matrix-card h3 { font-size: 16px; font-weight: 800; padding: 0 20px; }
+.matrix-scroll { overflow-x: auto; margin-top: 10px; padding: 0 20px; -webkit-overflow-scrolling: touch; }
+.matrix { border-collapse: collapse; width: 100%; font-size: 13px; }
+.matrix th, .matrix td { padding: 9px 8px; text-align: center; border-bottom: 1px solid var(--line-soft); white-space: nowrap; }
+.matrix th:first-child, .matrix td:first-child { text-align: left; padding-left: 0; color: var(--ink-soft); font-weight: 600; }
+.matrix thead th { font-size: 12.5px; font-weight: 800; max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
+.matrix tr:last-child td { border-bottom: none; }
+.matrix .yes { color: var(--sage-deep); font-weight: 800; }
+.matrix .no { color: var(--line); }
+
+.actions { margin-top: 16px; display: grid; grid-template-columns: 1.4fr 1fr; gap: 10px; }
+.actions .btn { padding: 14px 10px; font-size: 15px; }
+
+/* ---------- 가이드/푸터 ---------- */
+.guide { margin-top: 20px; padding: 20px; background: var(--sage-soft); border: 1px solid #DBEAE2; border-radius: var(--radius); }
+.guide h3 { font-size: 15px; font-weight: 800; color: var(--sage-deep); margin-bottom: 10px; }
+.guide ul { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.guide li { font-size: 13.5px; color: #3E5C4E; padding-left: 20px; position: relative; line-height: 1.6; }
+.guide li::before { content: '✓'; position: absolute; left: 2px; color: var(--sage-deep); font-weight: 800; }
+
+.foot { margin-top: 36px; padding-top: 20px; border-top: 1px solid var(--line); text-align: center; }
+.foot .ig { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; font-size: 15px; color: var(--brand-deep); text-decoration: none; }
+.foot .made { margin-top: 8px; font-size: 12.5px; color: var(--ink-soft); }
+.disclaimer { margin-top: 14px; font-size: 11.5px; color: var(--ink-faint); line-height: 1.6; }
+
+@media (max-width: 380px) {
+  .hero h1 { font-size: 26px; }
+  .c-total { font-size: 22px; }
+  .three-col { gap: 7px; }
+  .actions { grid-template-columns: 1fr; }
+}
