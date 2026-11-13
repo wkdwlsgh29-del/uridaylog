@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>산후조리원 가격 비교 | uridaylog</title>
+  <meta name="description" content="상담받은 산후조리원 견적을 넣으면 마사지·추가비용·할인·지원금까지 반영한 실제 부담액을 나란히 비교해 드려요. 전국 평균 대비, 1박당 가격, 포함 항목까지 한눈에." />
+  <meta name="theme-color" content="#FBF6F0" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="산후조리원 가격 비교" />
+  <meta property="og:description" content="견적만 넣으면 추가비용·지원금까지 계산한 진짜 가격을 나란히. 배우자에게 링크로 공유까지." />
+  <meta property="og:locale" content="ko_KR" />
+  <meta property="og:url" content="https://wkdwlsgh29-del.github.io/uridaylog/postpartum-care/" />
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏡</text></svg>" />
+
+  <link rel="stylesheet" as="style" crossorigin
+    href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+  <link rel="stylesheet" href="../shared/css/base.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="shell">
+
+    <header class="top">
+      <span class="brand-mark"><span class="logo">🏡</span><span id="brandName">uridaylog</span></span>
+      <a id="brandIg" class="chip chip-brand" href="#" target="_blank" rel="noopener">Instagram</a>
+    </header>
+
+    <section class="hero">
+      <h1>산후조리원,<br /><em>진짜 내는 돈</em>으로<br />비교하세요</h1>
+      <p class="sub">상담받은 견적을 넣으면 마사지·추가비용·할인·지원금까지 계산해서 나란히 보여드려요.</p>
+    </section>
+
+    <!-- 비교 결과 -->
+    <section id="result" class="hidden">
+      <div class="card support-card">
+        <div class="field-label">받을 지원금 <span class="optional-tag">(만원 · 실부담 계산에 반영)</span></div>
+        <div class="preset-row" id="supportPresets"></div>
+        <input class="field" type="number" id="support" inputmode="numeric" min="0" step="10" placeholder="직접 입력 (예: 지자체 산후조리비 포함 250)" />
+      </div>
+
+      <div class="card rank-card" id="rankCard"></div>
+      <div id="centerCards"></div>
+      <div class="card matrix-card" id="matrixCard"></div>
+
+      <div class="actions">
+        <button class="btn btn-primary" id="shareBtn">🔗 비교표 링크 공유</button>
+        <button class="btn btn-ghost" id="copyBtn">📋 글로 복사</button>
+      </div>
+    </section>
+
+    <!-- 입력 폼 -->
+    <section class="card input-card" id="formCard">
+      <h2 id="formTitle">조리원 견적 넣기</h2>
+
+      <label class="field-label" for="fName">조리원 이름</label>
+      <input class="field" type="text" id="fName" maxlength="24" placeholder="예: ○○산후조리원" autocomplete="off" />
+
+      <div class="two-col gap-top">
+        <div>
+          <label class="field-label" for="fRegion">위치 메모 <span class="optional-tag">(선택)</span></label>
+          <input class="field" type="text" id="fRegion" maxlength="16" placeholder="예: 집에서 10분" autocomplete="off" />
+        </div>
+        <div>
+          <label class="field-label" for="fRoom">객실</label>
+          <select class="field" id="fRoom"></select>
+        </div>
+      </div>
+
+      <div class="two-col gap-top">
+        <div>
+          <label class="field-label" for="fBase">기본 요금 <span class="optional-tag">(만원)</span></label>
+          <input class="field" type="number" id="fBase" inputmode="decimal" min="0" step="1" placeholder="예: 380" />
+        </div>
+        <div>
+          <label class="field-label" for="fDays">이용 기간 <span class="optional-tag">(일)</span></label>
+          <input class="field" type="number" id="fDays" inputmode="numeric" min="1" max="60" step="1" value="14" />
+        </div>
+      </div>
+
+      <div class="three-col gap-top">
+        <div>
+          <label class="field-label" for="fMassage">마사지 추가</label>
+          <input class="field" type="number" id="fMassage" inputmode="decimal" min="0" step="1" placeholder="0" />
+        </div>
+        <div>
+          <label class="field-label" for="fOther">기타 추가</label>
+          <input class="field" type="number" id="fOther" inputmode="decimal" min="0" step="1" placeholder="0" />
+        </div>
+        <div>
+          <label class="field-label" for="fDiscount">할인</label>
+          <input class="field" type="number" id="fDiscount" inputmode="decimal" min="0" step="1" placeholder="0" />
+        </div>
+      </div>
+      <p class="hint">모두 만원 단위. 기타 추가 = 배우자 식사, 다태아 추가, 연장 요금 등</p>
+
+      <div class="field-label gap-top">포함·가능 항목 <span class="optional-tag">(해당하는 것만 탭)</span></div>
+      <div class="feature-row" id="fFeatures"></div>
+
+      <label class="field-label gap-top" for="fMemo">메모 <span class="optional-tag">(선택)</span></label>
+      <input class="field" type="text" id="fMemo" maxlength="60" placeholder="예: 마사지 5회 포함, 계약금 30" autocomplete="off" />
+
+      <button class="btn btn-primary" id="saveBtn">비교에 추가하기</button>
+      <button class="btn btn-ghost hidden" id="cancelBtn">수정 취소</button>
+      <button class="link-btn" id="sampleBtn">아직 견적이 없다면 — 예시로 먼저 보기</button>
+    </section>
+
+    <div class="guide">
+      <h3>상담 때 꼭 물어보세요</h3>
+      <ul id="askList"></ul>
+    </div>
+
+    <footer class="foot">
+      <a id="footIg" class="ig" href="#" target="_blank" rel="noopener">📷 <span id="footIgHandle"></span></a>
+      <div class="made">조리원 투어 다니며 바로 넣을 수 있게 홈 화면에 저장해 두세요 🏡</div>
+      <p class="disclaimer" id="disclaimer"></p>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
